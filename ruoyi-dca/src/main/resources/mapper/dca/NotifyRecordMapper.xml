@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.NotifyRecordMapper">
+
+    <resultMap type="NotifyRecord" id="NotifyRecordResult">
+        <id     property="id"           column="id"              />
+        <result property="channelId"    column="channel_id"      />
+        <result property="traceId"      column="trace_id"        />
+        <result property="channelType"  column="channel_type"    />
+        <result property="channelName"  column="channel_name"    />
+        <result property="title"        column="title"           />
+        <result property="content"      column="content"         />
+        <result property="status"       column="status"          />
+        <result property="retryCount"   column="retry_count"     />
+        <result property="errorMsg"     column="error_msg"       />
+        <result property="recipient"    column="recipient"       />
+        <result property="templateId"   column="template_id"     />
+        <result property="templateVars" column="template_vars"   />
+        <result property="sendTime"     column="send_time"       />
+        <result property="extData"      column="ext_data"        />
+        <result property="remark"       column="remark"          />
+        <result property="createBy"     column="create_by"       />
+        <result property="createTime"   column="create_time"     />
+        <result property="updateBy"     column="update_by"       />
+        <result property="updateTime"   column="update_time"     />
+    </resultMap>
+
+    <sql id="selectNotifyRecordVo">
+        select id, channel_id, trace_id, channel_type, channel_name, title, content, status,
+               retry_count, error_msg, recipient, template_id, template_vars, send_time,
+               ext_data, remark, create_by, create_time, update_by, update_time
+        from notify_record
+    </sql>
+
+    <select id="selectNotifyRecordById" parameterType="Long" resultMap="NotifyRecordResult">
+        <include refid="selectNotifyRecordVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectNotifyRecordList" parameterType="NotifyRecord" resultMap="NotifyRecordResult">
+        <include refid="selectNotifyRecordVo"/>
+        <where>
+            <if test="channelId != null">
+                AND channel_id = #{channelId}
+            </if>
+            <if test="channelType != null and channelType != ''">
+                AND channel_type = #{channelType}
+            </if>
+            <if test="traceId != null and traceId != ''">
+                AND trace_id = #{traceId}
+            </if>
+            <if test="title != null and title != ''">
+                AND title like concat('%', #{title}, '%')
+            </if>
+            <if test="status != null">
+                AND status = #{status}
+            </if>
+            <if test="recipient != null and recipient != ''">
+                AND recipient like concat('%', #{recipient}, '%')
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                AND date_format(create_time,'%Y%m%d') &gt;= date_format(#{params.beginTime},'%Y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                AND date_format(create_time,'%Y%m%d') &lt;= date_format(#{params.endTime},'%Y%m%d')
+            </if>
+        </where>
+        order by create_time desc
+    </select>
+
+    <select id="selectByChannelId" parameterType="Long" resultMap="NotifyRecordResult">
+        <include refid="selectNotifyRecordVo"/>
+        where channel_id = #{channelId}
+        order by create_time desc
+    </select>
+
+    <select id="selectByStatus" parameterType="Integer" resultMap="NotifyRecordResult">
+        <include refid="selectNotifyRecordVo"/>
+        where status = #{status}
+        order by create_time asc
+    </select>
+
+    <select id="selectRetryableRecords" resultMap="NotifyRecordResult">
+        <include refid="selectNotifyRecordVo"/>
+        where status = 3
+        and retry_count &lt; #{maxRetryCount}
+        and create_time &gt; date_sub(now(), interval 24 hour)
+        order by create_time asc
+        limit 100
+    </select>
+
+    <select id="countByStatus" resultType="java.util.HashMap">
+        select
+            case status
+                when 0 then '待发送'
+                when 1 then '发送中'
+                when 2 then '成功'
+                when 3 then '失败'
+                else '未知'
+            end as name,
+            count(*) as value
+        from notify_record
+        group by status
+    </select>
+
+    <select id="countByChannel" resultType="java.util.HashMap">
+        select channel_name as name, count(*) as value
+        from notify_record
+        group by channel_id, channel_name
+        order by value desc
+        limit 10
+    </select>
+
+    <select id="countTodaySends" resultType="int">
+        select count(*) from notify_record
+        where date_format(create_time, '%Y%m%d') = date_format(now(), '%Y%m%d')
+    </select>
+
+    <select id="getSuccessRate" resultType="java.util.HashMap">
+        select
+            count(*) as total,
+            sum(case when status = 2 then 1 else 0 end) as success,
+            sum(case when status = 3 then 1 else 0 end) as failed,
+            round(sum(case when status = 2 then 1 else 0 end) * 100.0 / count(*), 2) as successRate
+        from notify_record
+        where create_time &gt;= date_sub(now(), interval 7 day)
+    </select>
+
+    <select id="getFailedStats" resultType="java.util.HashMap">
+        select
+            date_format(create_time, '%Y-%m-%d') as name,
+            count(*) as value
+        from notify_record
+        where status = 3
+        and create_time &gt;= date_sub(now(), interval #{days} day)
+        group by date_format(create_time, '%Y-%m-%d')
+        order by name desc
+    </select>
+
+    <insert id="insertNotifyRecord" parameterType="NotifyRecord" useGeneratedKeys="true" keyProperty="id">
+        insert into notify_record
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="channelId != null">channel_id,</if>
+            <if test="traceId != null and traceId != ''">trace_id,</if>
+            <if test="channelType != null and channelType != ''">channel_type,</if>
+            <if test="channelName != null and channelName != ''">channel_name,</if>
+            <if test="title != null and title != ''">title,</if>
+            <if test="content != null">content,</if>
+            <if test="status != null">status,</if>
+            <if test="retryCount != null">retry_count,</if>
+            <if test="errorMsg != null">error_msg,</if>
+            <if test="recipient != null">recipient,</if>
+            <if test="templateId != null">template_id,</if>
+            <if test="templateVars != null">template_vars,</if>
+            <if test="sendTime != null">send_time,</if>
+            <if test="extData != null">ext_data,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="channelId != null">#{channelId},</if>
+            <if test="traceId != null and traceId != ''">#{traceId},</if>
+            <if test="channelType != null and channelType != ''">#{channelType},</if>
+            <if test="channelName != null and channelName != ''">#{channelName},</if>
+            <if test="title != null and title != ''">#{title},</if>
+            <if test="content != null">#{content},</if>
+            <if test="status != null">#{status},</if>
+            <if test="retryCount != null">#{retryCount},</if>
+            <if test="errorMsg != null">#{errorMsg},</if>
+            <if test="recipient != null">#{recipient},</if>
+            <if test="templateId != null">#{templateId},</if>
+            <if test="templateVars != null">#{templateVars},</if>
+            <if test="sendTime != null">#{sendTime},</if>
+            <if test="extData != null">#{extData},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+         </trim>
+    </insert>
+
+    <insert id="batchInsertNotifyRecord">
+        insert into notify_record (channel_id, trace_id, channel_type, channel_name, title, content, status,
+                                   retry_count, error_msg, recipient, template_id, template_vars,
+                                    send_time, ext_data, remark, create_by, create_time)
+        values
+        <foreach collection="list" item="item" separator=",">
+            (#{item.channelId}, #{item.traceId}, #{item.channelType}, #{item.channelName}, #{item.title}, #{item.content},
+             #{item.status}, #{item.retryCount}, #{item.errorMsg}, #{item.recipient}, #{item.templateId},
+             #{item.templateVars}, #{item.sendTime}, #{item.extData}, #{item.remark}, #{item.createBy}, sysdate())
+        </foreach>
+    </insert>
+
+    <update id="updateNotifyRecord" parameterType="NotifyRecord">
+        update notify_record
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="status != null">status = #{status},</if>
+            <if test="retryCount != null">retry_count = #{retryCount},</if>
+            <if test="errorMsg != null">error_msg = #{errorMsg},</if>
+            <if test="sendTime != null">send_time = #{sendTime},</if>
+            <if test="extData != null">ext_data = #{extData},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </trim>
+        where id = #{id}
+    </update>
+
+    <update id="updateSendStatus">
+        update notify_record
+        set status = #{status},
+            <if test="errorMsg != null">error_msg = #{errorMsg},</if>
+            update_time = sysdate()
+        where id = #{id}
+    </update>
+
+    <update id="incrementRetryCount">
+        update notify_record
+        set retry_count = retry_count + 1,
+            update_time = sysdate()
+        where id = #{id}
+    </update>
+
+    <delete id="deleteNotifyRecordById" parameterType="Long">
+        delete from notify_record where id = #{id}
+    </delete>
+
+    <delete id="deleteNotifyRecordByIds" parameterType="Long">
+        delete from notify_record where id in
+        <foreach collection="array" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <delete id="cleanExpiredRecords">
+        delete from notify_record
+        where status = 2
+        and create_time &lt; date_sub(now(), interval #{days} day)
+    </delete>
+
+</mapper>

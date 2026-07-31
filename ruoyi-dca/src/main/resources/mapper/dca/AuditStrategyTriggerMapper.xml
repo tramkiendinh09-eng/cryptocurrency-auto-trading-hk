@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.AuditStrategyTriggerMapper">
+
+    <!-- 旧 DCA 触发审计 Mapper 仅保留历史查询，runtime 主链路禁止再写入旧表。 -->
+    <resultMap type="AuditStrategyTrigger" id="AuditStrategyTriggerResult">
+        <id property="id" column="id"/>
+        <result property="strategyId" column="strategy_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="triggerType" column="trigger_type"/>
+        <result property="beforePrice" column="before_price"/>
+        <result property="afterPrice" column="after_price"/>
+        <result property="priceChange" column="price_change"/>
+        <result property="threshold" column="threshold"/>
+        <result property="phase" column="phase"/>
+        <result property="result" column="result"/>
+        <result property="resultDesc" column="result_desc"/>
+        <result property="strategySnapshot" column="strategy_snapshot"/>
+        <result property="triggerTime" column="trigger_time"/>
+        <result property="remark" column="remark"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="selectAuditStrategyTriggerVo">
+        select id, strategy_id, user_id, trigger_type, before_price, after_price, price_change,
+               threshold, phase, result, result_desc, strategy_snapshot, trigger_time,
+               remark, create_by, create_time, update_by, update_time
+        from audit_strategy_trigger
+    </sql>
+
+    <select id="selectAuditStrategyTriggerById" parameterType="Long" resultMap="AuditStrategyTriggerResult">
+        <include refid="selectAuditStrategyTriggerVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectAuditStrategyTriggerList" parameterType="AuditStrategyTrigger" resultMap="AuditStrategyTriggerResult">
+        <include refid="selectAuditStrategyTriggerVo"/>
+        <where>
+            <if test="strategyId != null">
+                and strategy_id = #{strategyId}
+            </if>
+            <if test="userId != null">
+                and user_id = #{userId}
+            </if>
+            <if test="triggerType != null and triggerType != ''">
+                and trigger_type = #{triggerType}
+            </if>
+            <if test="phase != null">
+                and phase = #{phase}
+            </if>
+            <if test="result != null and result != ''">
+                and result = #{result}
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                and date_format(trigger_time,'%Y%m%d') &gt;= date_format(#{params.beginTime},'%Y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                and date_format(trigger_time,'%Y%m%d') &lt;= date_format(#{params.endTime},'%Y%m%d')
+            </if>
+        </where>
+        order by trigger_time desc
+    </select>
+</mapper>

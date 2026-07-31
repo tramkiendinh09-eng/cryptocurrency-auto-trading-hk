@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.event.EventIngestMapper">
+
+    <insert id="insertEventRaw" parameterType="com.ruoyi.dca.domain.event.EventRaw" useGeneratedKeys="true" keyProperty="id">
+        insert into event_raw (
+            trace_id,
+            event_type,
+            symbol,
+            exchange_code,
+            payload_json,
+            created_at
+        ) values (
+            #{traceId},
+            #{eventType},
+            #{symbol},
+            #{exchangeCode},
+            #{payloadJson},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertMarketEvent" parameterType="com.ruoyi.dca.domain.event.MarketEvent" useGeneratedKeys="true" keyProperty="id">
+        insert into market_event (
+            trace_id,
+            symbol,
+            exchange_code,
+            price,
+            volume
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{exchangeCode},
+            #{price},
+            #{volume}
+        )
+    </insert>
+
+    <insert id="insertMarketKlineSnapshot" parameterType="com.ruoyi.dca.domain.event.MarketKlineSnapshot" useGeneratedKeys="true" keyProperty="id">
+        insert into market_kline_snapshot (
+            trace_id,
+            symbol,
+            exchange_code,
+            interval_code,
+            open_time,
+            close_time,
+            open_price,
+            high_price,
+            low_price,
+            close_price,
+            volume,
+            quote_volume,
+            trade_count,
+            source,
+            payload_json
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{exchangeCode},
+            #{intervalCode},
+            #{openTime},
+            #{closeTime},
+            #{openPrice},
+            #{highPrice},
+            #{lowPrice},
+            #{closePrice},
+            #{volume},
+            #{quoteVolume},
+            #{tradeCount},
+            #{source},
+            #{payloadJson}
+        )
+    </insert>
+
+    <insert id="insertMarketMetricSnapshot" parameterType="com.ruoyi.dca.domain.event.MarketMetricSnapshot" useGeneratedKeys="true" keyProperty="id">
+        insert into market_metric_snapshot (
+            trace_id,
+            symbol,
+            exchange_code,
+            observed_at,
+            latest_price,
+            mark_price,
+            mark_price_deviation_pct,
+            funding_rate,
+            open_interest,
+            volume_24h,
+            quote_volume_24h,
+            liquidation_notional_15m,
+            liquidation_notional_60m,
+            liquidation_notional_240m,
+            largest_liquidation_notional_usd,
+            largest_liquidation_side,
+            source_status,
+            payload_json
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{exchangeCode},
+            #{observedAt},
+            #{latestPrice},
+            #{markPrice},
+            #{markPriceDeviationPct},
+            #{fundingRate},
+            #{openInterest},
+            #{volume24h},
+            #{quoteVolume24h},
+            #{liquidationNotional15m},
+            #{liquidationNotional60m},
+            #{liquidationNotional240m},
+            #{largestLiquidationNotionalUsd},
+            #{largestLiquidationSide},
+            #{sourceStatus},
+            #{payloadJson}
+        )
+    </insert>
+
+    <insert id="insertNewsEvent" parameterType="com.ruoyi.dca.domain.event.NewsEvent" useGeneratedKeys="true" keyProperty="id">
+        insert into news_event (
+            trace_id,
+            symbol,
+            source,
+            headline
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{source},
+            #{headline}
+        )
+    </insert>
+
+    <insert id="insertOnchainEvent" parameterType="com.ruoyi.dca.domain.event.OnchainEvent" useGeneratedKeys="true" keyProperty="id">
+        insert into onchain_event (
+            trace_id,
+            symbol,
+            wallet,
+            payload_json
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{wallet},
+            #{payloadJson}
+        )
+    </insert>
+
+    <insert id="insertSocialEvent" parameterType="com.ruoyi.dca.domain.event.SocialEvent" useGeneratedKeys="true" keyProperty="id">
+        insert into social_event (
+            trace_id,
+            symbol,
+            score,
+            payload_json
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{score},
+            #{payloadJson}
+        )
+    </insert>
+
+    <select id="selectRecentRawMarketEvents" resultType="com.ruoyi.dca.domain.event.EventRaw">
+        select
+            id,
+            trace_id as traceId,
+            event_type as eventType,
+            symbol,
+            exchange_code as exchangeCode,
+            payload_json as payloadJson,
+            created_at as createdAt
+        from event_raw
+        where event_type in ('market_tick', 'market_metric')
+          and symbol = #{symbol}
+          and exchange_code = #{exchangeCode}
+          and created_at &gt;= #{createdAtMin}
+        order by created_at desc, id desc
+        limit #{limit}
+    </select>
+
+</mapper>

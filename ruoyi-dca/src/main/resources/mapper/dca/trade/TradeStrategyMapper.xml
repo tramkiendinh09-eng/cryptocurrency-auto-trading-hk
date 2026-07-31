@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.TradeStrategyMapper">
+
+    <resultMap id="TradeStrategyResult" type="com.ruoyi.dca.domain.trade.TradeStrategy">
+        <id property="id" column="id"/>
+        <result property="strategyKey" column="strategy_key"/>
+        <result property="strategyName" column="strategy_name"/>
+        <result property="runtimeMode" column="runtime_mode"/>
+        <result property="symbolsJson" column="symbols_json"/>
+        <result property="exchangesJson" column="exchanges_json"/>
+        <result property="enabled" column="enabled"/>
+    </resultMap>
+
+    <sql id="tradeStrategyColumns">
+        id, strategy_key, strategy_name, runtime_mode, symbols_json, exchanges_json, enabled
+    </sql>
+
+    <resultMap id="TradeStrategyVersionResult" type="com.ruoyi.dca.domain.trade.TradeStrategyVersion">
+        <id property="id" column="id"/>
+        <result property="strategyId" column="strategy_id"/>
+        <result property="versionNo" column="version_no"/>
+        <result property="configJson" column="config_json"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <resultMap id="TradeSymbolScopeResult" type="com.ruoyi.dca.domain.trade.TradeSymbolScope">
+        <id property="id" column="id"/>
+        <result property="strategyId" column="strategy_id"/>
+        <result property="symbol" column="symbol"/>
+        <result property="exchangeCode" column="exchange_code"/>
+    </resultMap>
+
+    <resultMap id="ExchangeAccountBindingResult" type="com.ruoyi.dca.domain.trade.ExchangeAccountBinding">
+        <id property="id" column="id"/>
+        <result property="strategyId" column="strategy_id"/>
+        <result property="accountId" column="account_id"/>
+        <result property="exchangeCode" column="exchange_code"/>
+        <result property="enabled" column="enabled"/>
+    </resultMap>
+
+    <select id="selectTradeStrategyList" parameterType="com.ruoyi.dca.domain.trade.TradeStrategy" resultMap="TradeStrategyResult">
+        select <include refid="tradeStrategyColumns"/>
+        from trade_strategy
+        <where>
+            <if test="strategyKey != null and strategyKey != ''">
+                and strategy_key = #{strategyKey}
+            </if>
+            <if test="strategyName != null and strategyName != ''">
+                and strategy_name like concat('%', #{strategyName}, '%')
+            </if>
+            <if test="runtimeMode != null">
+                and runtime_mode = #{runtimeMode}
+            </if>
+            <if test="enabled != null">
+                and enabled = #{enabled}
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+    <select id="selectTradeStrategyById" resultMap="TradeStrategyResult">
+        select <include refid="tradeStrategyColumns"/>
+        from trade_strategy
+        where id = #{id}
+    </select>
+
+    <insert id="insertTradeStrategy" parameterType="com.ruoyi.dca.domain.trade.TradeStrategy" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_strategy (
+            strategy_key,
+            strategy_name,
+            runtime_mode,
+            symbols_json,
+            exchanges_json,
+            enabled
+        ) values (
+            #{strategyKey},
+            #{strategyName},
+            #{runtimeMode},
+            #{symbolsJson},
+            #{exchangesJson},
+            #{enabled}
+        )
+    </insert>
+
+    <update id="updateTradeStrategy" parameterType="com.ruoyi.dca.domain.trade.TradeStrategy">
+        update trade_strategy
+        <set>
+            <if test="strategyKey != null and strategyKey != ''">strategy_key = #{strategyKey},</if>
+            <if test="strategyName != null and strategyName != ''">strategy_name = #{strategyName},</if>
+            <if test="runtimeMode != null">runtime_mode = #{runtimeMode},</if>
+            <if test="symbolsJson != null">symbols_json = #{symbolsJson},</if>
+            <if test="exchangesJson != null">exchanges_json = #{exchangesJson},</if>
+            <if test="enabled != null">enabled = #{enabled},</if>
+            updated_at = now()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteTradeStrategyVersionsByStrategyIds">
+        delete from trade_strategy_version
+        where strategy_id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <delete id="deleteTradeSymbolScopesByStrategyId">
+        delete from trade_symbol_scope
+        where strategy_id = #{strategyId}
+    </delete>
+
+    <delete id="deleteTradeSymbolScopesByStrategyIds">
+        delete from trade_symbol_scope
+        where strategy_id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <select id="selectExchangeAccountBindings" resultMap="ExchangeAccountBindingResult">
+        select id, strategy_id, account_id, exchange_code, enabled
+        from exchange_account_binding
+        where strategy_id = #{strategyId}
+        order by id asc
+    </select>
+
+    <delete id="deleteExchangeAccountBindingsByStrategyId">
+        delete from exchange_account_binding
+        where strategy_id = #{strategyId}
+    </delete>
+
+    <delete id="deleteExchangeAccountBindingsByStrategyIds">
+        delete from exchange_account_binding
+        where strategy_id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <insert id="insertExchangeAccountBindings">
+        insert into exchange_account_binding (
+            strategy_id,
+            account_id,
+            exchange_code,
+            enabled
+        ) values
+        <foreach collection="bindings" item="binding" separator=",">
+            (
+                #{binding.strategyId},
+                #{binding.accountId},
+                #{binding.exchangeCode},
+                #{binding.enabled}
+            )
+        </foreach>
+    </insert>
+
+    <insert id="insertTradeSymbolScopes">
+        insert into trade_symbol_scope (
+            strategy_id,
+            symbol,
+            exchange_code
+        ) values
+        <foreach collection="scopes" item="scope" separator=",">
+            (
+                #{scope.strategyId},
+                #{scope.symbol},
+                #{scope.exchangeCode}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectTradeSymbolScopes" resultMap="TradeSymbolScopeResult">
+        select id, strategy_id, symbol, exchange_code
+        from trade_symbol_scope
+        where strategy_id = #{strategyId}
+        order by id asc
+    </select>
+
+    <delete id="deleteTradeStrategyByIds">
+        delete from trade_strategy
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <select id="selectMaxVersionNo" resultType="java.lang.Integer">
+        select max(version_no)
+        from trade_strategy_version
+        where strategy_id = #{strategyId}
+    </select>
+
+    <insert id="insertTradeStrategyVersion" parameterType="com.ruoyi.dca.domain.trade.TradeStrategyVersion" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_strategy_version (
+            strategy_id,
+            version_no,
+            config_json
+        ) values (
+            #{strategyId},
+            #{versionNo},
+            #{configJson}
+        )
+    </insert>
+
+    <select id="selectLatestTradeStrategyVersion" resultMap="TradeStrategyVersionResult">
+        select id, strategy_id, version_no, config_json, created_at
+        from trade_strategy_version
+        where strategy_id = #{strategyId}
+        order by version_no desc, id desc
+        limit 1
+    </select>
+
+    <select id="selectTradeStrategyVersions" resultMap="TradeStrategyVersionResult">
+        select id, strategy_id, version_no, config_json, created_at
+        from trade_strategy_version
+        where strategy_id = #{strategyId}
+        order by version_no desc, id desc
+    </select>
+
+</mapper>

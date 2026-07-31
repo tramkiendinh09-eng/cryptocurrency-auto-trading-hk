@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.CardKeyMapper">
+
+    <resultMap type="CardKey" id="CardKeyResult">
+        <id     property="id"           column="id"           />
+        <result property="cardKey"      column="card_key"     />
+        <result property="cardType"     column="card_type"    />
+        <result property="cardLevel"    column="card_level"   />
+        <result property="days"         column="days"         />
+        <result property="counts"       column="counts"       />
+        <result property="featureFlags" column="feature_flags"/>
+        <result property="status"       column="status"       />
+        <result property="bindMachine"  column="bind_machine" />
+        <result property="bindUserId"   column="bind_user_id" />
+        <result property="activeTime"   column="active_time"  />
+        <result property="expireTime"   column="expire_time"  />
+        <result property="batchNo"      column="batch_no"     />
+        <result property="remark"       column="remark"       />
+        <result property="createBy"     column="create_by"    />
+        <result property="createTime"   column="create_time"  />
+        <result property="updateBy"     column="update_by"    />
+        <result property="updateTime"   column="update_time"  />
+    </resultMap>
+
+    <sql id="selectCardKeyVo">
+        select id, card_key, card_type, card_level, days, counts, feature_flags, status,
+               bind_machine, bind_user_id, active_time, expire_time, batch_no,
+               remark, create_by, create_time, update_by, update_time
+        from card_key
+    </sql>
+
+    <select id="selectCardKeyById" parameterType="Long" resultMap="CardKeyResult">
+        <include refid="selectCardKeyVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectByCardKey" parameterType="String" resultMap="CardKeyResult">
+        <include refid="selectCardKeyVo"/>
+        where card_key = #{cardKey}
+    </select>
+
+    <select id="selectCardKeyList" parameterType="CardKey" resultMap="CardKeyResult">
+        <include refid="selectCardKeyVo"/>
+        <where>
+            <if test="cardKey != null and cardKey != ''">
+                AND card_key like concat('%', #{cardKey}, '%')
+            </if>
+            <if test="cardType != null and cardType != ''">
+                AND card_type = #{cardType}
+            </if>
+            <if test="cardLevel != null and cardLevel != ''">
+                AND card_level = #{cardLevel}
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+            <if test="batchNo != null and batchNo != ''">
+                AND batch_no = #{batchNo}
+            </if>
+            <if test="bindUserId != null">
+                AND bind_user_id = #{bindUserId}
+            </if>
+            <if test="bindMachine != null and bindMachine != ''">
+                AND bind_machine like concat('%', #{bindMachine}, '%')
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                AND date_format(create_time,'%Y%m%d') &gt;= date_format(#{params.beginTime},'%Y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                AND date_format(create_time,'%Y%m%d') &lt;= date_format(#{params.endTime},'%Y%m%d')
+            </if>
+        </where>
+        order by create_time desc
+    </select>
+
+    <select id="selectByBatchNo" parameterType="String" resultMap="CardKeyResult">
+        <include refid="selectCardKeyVo"/>
+        where batch_no = #{batchNo}
+        order by create_time desc
+    </select>
+
+    <select id="selectByUserId" parameterType="Long" resultMap="CardKeyResult">
+        <include refid="selectCardKeyVo"/>
+        where bind_user_id = #{userId}
+        and status = 'activated'
+        order by expire_time desc
+        limit 1
+    </select>
+
+    <select id="selectByMachineCode" parameterType="String" resultMap="CardKeyResult">
+        <include refid="selectCardKeyVo"/>
+        where bind_machine = #{machineCode}
+        and status = 'activated'
+        order by expire_time desc
+    </select>
+
+    <select id="selectExpiringCards" resultMap="CardKeyResult">
+        <include refid="selectCardKeyVo"/>
+        where status = 'activated'
+        and expire_time between now() and date_add(now(), interval #{days} day)
+        order by expire_time asc
+    </select>
+
+    <select id="selectExpiredCards" resultMap="CardKeyResult">
+        <include refid="selectCardKeyVo"/>
+        where status = 'activated'
+        and expire_time &lt; now()
+        order by expire_time asc
+    </select>
+
+    <select id="countByBatchNo" parameterType="String" resultType="int">
+        select count(*) from card_key where batch_no = #{batchNo}
+    </select>
+
+    <select id="countByStatus" resultType="java.util.HashMap">
+        select status as name, count(*) as value
+        from card_key
+        group by status
+    </select>
+
+    <select id="countByType" resultType="java.util.HashMap">
+        select card_type as name, count(*) as value
+        from card_key
+        group by card_type
+    </select>
+
+    <insert id="insertCardKey" parameterType="CardKey" useGeneratedKeys="true" keyProperty="id">
+        insert into card_key
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="cardKey != null and cardKey != ''">card_key,</if>
+            <if test="cardType != null and cardType != ''">card_type,</if>
+            <if test="cardLevel != null and cardLevel != ''">card_level,</if>
+            <if test="days != null">days,</if>
+            <if test="counts != null">counts,</if>
+            <if test="featureFlags != null">feature_flags,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="bindMachine != null">bind_machine,</if>
+            <if test="bindUserId != null">bind_user_id,</if>
+            <if test="activeTime != null">active_time,</if>
+            <if test="expireTime != null">expire_time,</if>
+            <if test="batchNo != null and batchNo != ''">batch_no,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="cardKey != null and cardKey != ''">#{cardKey},</if>
+            <if test="cardType != null and cardType != ''">#{cardType},</if>
+            <if test="cardLevel != null and cardLevel != ''">#{cardLevel},</if>
+            <if test="days != null">#{days},</if>
+            <if test="counts != null">#{counts},</if>
+            <if test="featureFlags != null">#{featureFlags},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="bindMachine != null">#{bindMachine},</if>
+            <if test="bindUserId != null">#{bindUserId},</if>
+            <if test="activeTime != null">#{activeTime},</if>
+            <if test="expireTime != null">#{expireTime},</if>
+            <if test="batchNo != null and batchNo != ''">#{batchNo},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+         </trim>
+    </insert>
+
+    <insert id="batchInsertCardKey">
+        insert into card_key (card_key, card_type, card_level, days, counts, feature_flags, status, expire_time, batch_no, remark, create_by, create_time)
+        values
+        <foreach collection="list" item="item" separator=",">
+            (#{item.cardKey}, #{item.cardType}, #{item.cardLevel}, #{item.days}, #{item.counts},
+             #{item.featureFlags}, #{item.status}, #{item.expireTime}, #{item.batchNo}, #{item.remark}, #{item.createBy}, sysdate())
+        </foreach>
+    </insert>
+
+    <update id="updateCardKey" parameterType="CardKey">
+        update card_key
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="cardType != null and cardType != ''">card_type = #{cardType},</if>
+            <if test="cardLevel != null and cardLevel != ''">card_level = #{cardLevel},</if>
+            <if test="days != null">days = #{days},</if>
+            <if test="counts != null">counts = #{counts},</if>
+            <if test="featureFlags != null">feature_flags = #{featureFlags},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="bindMachine != null">bind_machine = #{bindMachine},</if>
+            <if test="bindUserId != null">bind_user_id = #{bindUserId},</if>
+            <if test="activeTime != null">active_time = #{activeTime},</if>
+            <if test="expireTime != null">expire_time = #{expireTime},</if>
+            <if test="batchNo != null">batch_no = #{batchNo},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </trim>
+        where id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        update card_key set status = #{status}, update_time = sysdate() where id = #{id}
+    </update>
+
+    <update id="activateCard" parameterType="CardKey">
+        update card_key
+        set status = 'activated',
+            bind_user_id = #{bindUserId},
+            bind_machine = #{bindMachine},
+            active_time = sysdate(),
+            update_time = sysdate()
+        where id = #{id}
+    </update>
+
+    <update id="bindMachine">
+        update card_key set bind_machine = #{machineCode}, update_time = sysdate() where id = #{id}
+    </update>
+
+    <update id="unbindUser">
+        update card_key set bind_user_id = null, bind_machine = null, status = 'unused', update_time = sysdate()
+        where bind_user_id = #{userId}
+    </update>
+
+    <update id="batchUpdateExpiredStatus">
+        update card_key set status = 'expired', update_time = sysdate()
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <delete id="deleteCardKeyById" parameterType="Long">
+        delete from card_key where id = #{id}
+    </delete>
+
+    <delete id="deleteCardKeyByIds" parameterType="Long">
+        delete from card_key where id in
+        <foreach collection="array" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

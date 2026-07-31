@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.MarketCollectTaskMapper">
+
+    <resultMap type="com.ruoyi.dca.domain.MarketCollectTask" id="MarketCollectTaskResult">
+        <result property="id" column="id"/>
+        <result property="taskName" column="task_name"/>
+        <result property="symbol" column="symbol"/>
+        <result property="collectPrice" column="collect_price"/>
+        <result property="collectVolume" column="collect_volume"/>
+        <result property="collectKline1h" column="collect_kline_1h"/>
+        <result property="collectKline4h" column="collect_kline_4h"/>
+        <result property="collectKline1d" column="collect_kline_1d"/>
+        <result property="collectFearGreed" column="collect_fear_greed"/>
+        <result property="collectOnchain" column="collect_onchain"/>
+        <result property="collectGas" column="collect_gas"/>
+        <result property="priceApiId" column="price_api_id"/>
+        <result property="volumeApiId" column="volume_api_id"/>
+        <result property="klineApiId" column="kline_api_id"/>
+        <result property="onchainApiId" column="onchain_api_id"/>
+        <result property="gasApiId" column="gas_api_id"/>
+        <result property="collectInterval" column="collect_interval"/>
+        <result property="enabled" column="enabled"/>
+        <result property="remark" column="remark"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="selectMarketCollectTaskVo">
+        select id, task_name, symbol, collect_price, collect_volume, collect_kline_1h,
+               collect_kline_4h, collect_kline_1d, collect_fear_greed, collect_onchain,
+               collect_gas, price_api_id, volume_api_id, kline_api_id, onchain_api_id,
+               gas_api_id, collect_interval, enabled, remark, create_by, create_time,
+               update_by, update_time
+        from market_collect_task
+    </sql>
+
+    <select id="selectMarketCollectTaskList" parameterType="com.ruoyi.dca.domain.MarketCollectTask" resultMap="MarketCollectTaskResult">
+        <include refid="selectMarketCollectTaskVo"/>
+        <where>
+            <if test="taskName != null and taskName != ''">
+                and task_name like concat('%', #{taskName}, '%')
+            </if>
+            <if test="symbol != null and symbol != ''">
+                and symbol = #{symbol}
+            </if>
+            <if test="enabled != null and enabled != ''">
+                and enabled = #{enabled}
+            </if>
+        </where>
+        order by id asc
+    </select>
+
+    <select id="selectMarketCollectTaskById" parameterType="Long" resultMap="MarketCollectTaskResult">
+        <include refid="selectMarketCollectTaskVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectEnabledTasks" resultMap="MarketCollectTaskResult">
+        <include refid="selectMarketCollectTaskVo"/>
+        where enabled = '1'
+        order by id asc
+    </select>
+
+    <select id="selectTaskBySymbol" parameterType="String" resultMap="MarketCollectTaskResult">
+        <include refid="selectMarketCollectTaskVo"/>
+        where symbol = #{symbol}
+    </select>
+
+</mapper>

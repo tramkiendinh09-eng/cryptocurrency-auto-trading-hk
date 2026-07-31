@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.task.TradeDataCleanupMapper">
+
+    <delete id="deleteSignalScoresBefore">
+        delete from signal_score
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteSignalEventsBefore">
+        delete from signal_event
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteExpiredSignalWindowStatesBefore">
+        delete from signal_window_state
+        where created_at &lt; #{cutoffTime}
+          and (is_active = 0 or (expires_at is not null and expires_at &lt; #{cutoffTime}))
+    </delete>
+
+    <delete id="deleteMarketEventsBefore">
+        delete from market_event
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteMarketKlineSnapshotsBefore">
+        delete from market_kline_snapshot
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteMarketMetricSnapshotsBefore">
+        delete from market_metric_snapshot
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteNewsEventsBefore">
+        delete from news_event
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteOnchainEventsBefore">
+        delete from onchain_event
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteSocialEventsBefore">
+        delete from social_event
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteEventRawsBefore">
+        delete from event_raw
+        where created_at &lt; #{cutoffTime}
+    </delete>
+</mapper>

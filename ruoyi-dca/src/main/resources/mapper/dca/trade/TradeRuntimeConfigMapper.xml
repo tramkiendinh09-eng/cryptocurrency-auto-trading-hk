@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.TradeRuntimeConfigMapper">
+
+    <resultMap id="TradeRuntimeConfigResult" type="com.ruoyi.dca.domain.trade.TradeRuntimeConfig">
+        <id property="id" column="id"/>
+        <result property="defaultMode" column="default_mode"/>
+        <result property="liveEnabled" column="live_enabled"/>
+        <result property="maxPositionRatio" column="max_position_ratio"/>
+        <result property="maxDailyLoss" column="max_daily_loss"/>
+        <result property="maxConsecutiveFailures" column="max_consecutive_failures"/>
+        <result property="allowedSymbolsJson" column="allowed_symbols_json"/>
+        <result property="allowedExchangesJson" column="allowed_exchanges_json"/>
+        <result property="requireAccountBinding" column="require_account_binding"/>
+        <result property="liveOrderRequiresHealthyAccount" column="live_order_requires_healthy_account"/>
+        <result property="runtimeFlagsJson" column="runtime_flags_json"/>
+        <result property="notifyDefaultsJson" column="notify_defaults_json"/>
+        <result property="eventRetentionDays" column="event_retention_days"/>
+        <result property="replayRetentionDays" column="replay_retention_days"/>
+        <result property="deliberationEnabled" column="deliberation_enabled"/>
+        <result property="deliberationMaxRounds" column="deliberation_max_rounds"/>
+        <result property="deliberationFailOpen" column="deliberation_fail_open"/>
+        <result property="routeMaxConcurrency" column="route_max_concurrency"/>
+        <result property="routeSchedulerMode" column="route_scheduler_mode"/>
+    </resultMap>
+
+    <sql id="tradeRuntimeConfigColumns">
+        id,
+        default_mode,
+        live_enabled,
+        max_position_ratio,
+        max_daily_loss,
+        max_consecutive_failures,
+        allowed_symbols_json,
+        allowed_exchanges_json,
+        require_account_binding,
+        live_order_requires_healthy_account,
+        runtime_flags_json,
+        notify_defaults_json,
+        event_retention_days,
+        replay_retention_days,
+        deliberation_enabled,
+        deliberation_max_rounds,
+        deliberation_fail_open,
+        route_max_concurrency,
+        route_scheduler_mode
+    </sql>
+
+    <select id="selectCurrentConfig" resultMap="TradeRuntimeConfigResult">
+        select <include refid="tradeRuntimeConfigColumns"/>
+        from trade_runtime_config
+        where singleton_key = 1
+        limit 1
+    </select>
+
+    <insert id="insertTradeRuntimeConfig" parameterType="com.ruoyi.dca.domain.trade.TradeRuntimeConfig" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_runtime_config (
+            singleton_key,
+            default_mode,
+            live_enabled,
+            max_position_ratio,
+            max_daily_loss,
+            max_consecutive_failures,
+            allowed_symbols_json,
+            allowed_exchanges_json,
+            require_account_binding,
+            live_order_requires_healthy_account,
+            runtime_flags_json,
+            notify_defaults_json,
+            event_retention_days,
+            replay_retention_days,
+            deliberation_enabled,
+            deliberation_max_rounds,
+            deliberation_fail_open,
+            route_max_concurrency,
+            route_scheduler_mode
+        ) values (
+            1,
+            #{defaultMode},
+            #{liveEnabled},
+            #{maxPositionRatio},
+            #{maxDailyLoss},
+            #{maxConsecutiveFailures},
+            #{allowedSymbolsJson},
+            #{allowedExchangesJson},
+            #{requireAccountBinding},
+            #{liveOrderRequiresHealthyAccount},
+            #{runtimeFlagsJson},
+            #{notifyDefaultsJson},
+            #{eventRetentionDays},
+            #{replayRetentionDays},
+            #{deliberationEnabled},
+            #{deliberationMaxRounds},
+            #{deliberationFailOpen},
+            #{routeMaxConcurrency},
+            #{routeSchedulerMode}
+        )
+    </insert>
+
+    <update id="updateTradeRuntimeConfig" parameterType="com.ruoyi.dca.domain.trade.TradeRuntimeConfig">
+        update trade_runtime_config
+        <set>
+            <if test="defaultMode != null">default_mode = #{defaultMode},</if>
+            <if test="liveEnabled != null">live_enabled = #{liveEnabled},</if>
+            <if test="maxPositionRatio != null">max_position_ratio = #{maxPositionRatio},</if>
+            <if test="maxDailyLoss != null">max_daily_loss = #{maxDailyLoss},</if>
+            <if test="maxConsecutiveFailures != null">max_consecutive_failures = #{maxConsecutiveFailures},</if>
+            <if test="allowedSymbolsJson != null">allowed_symbols_json = #{allowedSymbolsJson},</if>
+            <if test="allowedExchangesJson != null">allowed_exchanges_json = #{allowedExchangesJson},</if>
+            <if test="requireAccountBinding != null">require_account_binding = #{requireAccountBinding},</if>
+            <if test="liveOrderRequiresHealthyAccount != null">live_order_requires_healthy_account = #{liveOrderRequiresHealthyAccount},</if>
+            <if test="runtimeFlagsJson != null">runtime_flags_json = #{runtimeFlagsJson},</if>
+            <if test="notifyDefaultsJson != null">notify_defaults_json = #{notifyDefaultsJson},</if>
+            <if test="eventRetentionDays != null">event_retention_days = #{eventRetentionDays},</if>
+            <if test="replayRetentionDays != null">replay_retention_days = #{replayRetentionDays},</if>
+            <if test="deliberationEnabled != null">deliberation_enabled = #{deliberationEnabled},</if>
+            <if test="deliberationMaxRounds != null">deliberation_max_rounds = #{deliberationMaxRounds},</if>
+            <if test="deliberationFailOpen != null">deliberation_fail_open = #{deliberationFailOpen},</if>
+            <if test="routeMaxConcurrency != null">route_max_concurrency = #{routeMaxConcurrency},</if>
+            <if test="routeSchedulerMode != null">route_scheduler_mode = #{routeSchedulerMode},</if>
+            updated_at = now()
+        </set>
+        where singleton_key = 1
+    </update>
+
+</mapper>

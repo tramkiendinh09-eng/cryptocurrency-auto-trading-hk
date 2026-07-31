@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.MarketDataMapper">
+
+    <resultMap type="com.ruoyi.dca.domain.MarketData" id="MarketDataResult">
+        <result property="id" column="id"/>
+        <result property="symbol" column="symbol"/>
+        <result property="timestamp" column="timestamp"/>
+        <result property="collectionTime" column="collection_time"/>
+        <result property="price" column="price"/>
+        <result property="priceChange24h" column="price_change_24h"/>
+        <result property="priceChangePercent24h" column="price_change_percent_24h"/>
+        <result property="volume24h" column="volume_24h"/>
+        <result property="volume24hBase" column="volume_24h_base"/>
+        <result property="high24h" column="high_24h"/>
+        <result property="low24h" column="low_24h"/>
+        <result property="kline1hOpen" column="kline_1h_open"/>
+        <result property="kline1hHigh" column="kline_1h_high"/>
+        <result property="kline1hLow" column="kline_1h_low"/>
+        <result property="kline1hClose" column="kline_1h_close"/>
+        <result property="kline1hVolume" column="kline_1h_volume"/>
+        <result property="kline1hTimestamp" column="kline_1h_timestamp"/>
+        <result property="kline4hOpen" column="kline_4h_open"/>
+        <result property="kline4hHigh" column="kline_4h_high"/>
+        <result property="kline4hLow" column="kline_4h_low"/>
+        <result property="kline4hClose" column="kline_4h_close"/>
+        <result property="kline4hVolume" column="kline_4h_volume"/>
+        <result property="kline4hTimestamp" column="kline_4h_timestamp"/>
+        <result property="kline1dOpen" column="kline_1d_open"/>
+        <result property="kline1dHigh" column="kline_1d_high"/>
+        <result property="kline1dLow" column="kline_1d_low"/>
+        <result property="kline1dClose" column="kline_1d_close"/>
+        <result property="kline1dVolume" column="kline_1d_volume"/>
+        <result property="kline1dTimestamp" column="kline_1d_timestamp"/>
+        <result property="fearGreedIndex" column="fear_greed_index"/>
+        <result property="fearGreedClassification" column="fear_greed_classification"/>
+        <result property="exchangeInflow" column="exchange_inflow"/>
+        <result property="exchangeOutflow" column="exchange_outflow"/>
+        <result property="netFlow" column="net_flow"/>
+        <result property="whaleTransactions" column="whale_transactions"/>
+        <result property="dataSource" column="data_source"/>
+        <result property="rawData" column="raw_data"/>
+    </resultMap>
+
+    <sql id="selectMarketDataVo">
+        select id, symbol, timestamp, collection_time,
+               price, price_change_24h, price_change_percent_24h,
+               volume_24h, volume_24h_base, high_24h, low_24h,
+               kline_1h_open, kline_1h_high, kline_1h_low, kline_1h_close, kline_1h_volume, kline_1h_timestamp,
+               kline_4h_open, kline_4h_high, kline_4h_low, kline_4h_close, kline_4h_volume, kline_4h_timestamp,
+               kline_1d_open, kline_1d_high, kline_1d_low, kline_1d_close, kline_1d_volume, kline_1d_timestamp,
+               fear_greed_index, fear_greed_classification,
+               exchange_inflow, exchange_outflow, net_flow, whale_transactions,
+               data_source, raw_data
+        from market_data
+    </sql>
+
+    <select id="selectLatestMarketData" resultMap="MarketDataResult">
+        <include refid="selectMarketDataVo"/>
+        where symbol = #{symbol}
+        order by timestamp desc
+        limit 1
+    </select>
+
+    <select id="selectMarketDataHistory" resultMap="MarketDataResult">
+        <include refid="selectMarketDataVo"/>
+        <where>
+            <if test="symbol != null and symbol != ''">
+                and symbol = #{symbol}
+            </if>
+            <if test="startTime != null">
+                and collection_time &gt;= #{startTime}
+            </if>
+            <if test="endTime != null">
+                and collection_time &lt;= #{endTime}
+            </if>
+        </where>
+        order by timestamp desc
+        <if test="limit != null">
+            limit #{limit}
+        </if>
+    </select>
+
+    <insert id="insertMarketData" parameterType="com.ruoyi.dca.domain.MarketData" useGeneratedKeys="true" keyProperty="id">
+        insert into market_data
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="symbol != null and symbol != ''">symbol,</if>
+            <if test="timestamp != null">timestamp,</if>
+            <if test="collectionTime != null">collection_time,</if>
+            <if test="price != null">price,</if>
+            <if test="priceChange24h != null">price_change_24h,</if>
+            <if test="priceChangePercent24h != null">price_change_percent_24h,</if>
+            <if test="volume24h != null">volume_24h,</if>
+            <if test="volume24hBase != null">volume_24h_base,</if>
+            <if test="high24h != null">high_24h,</if>
+            <if test="low24h != null">low_24h,</if>
+            <if test="kline1hOpen != null">kline_1h_open,</if>
+            <if test="kline1hHigh != null">kline_1h_high,</if>
+            <if test="kline1hLow != null">kline_1h_low,</if>
+            <if test="kline1hClose != null">kline_1h_close,</if>
+            <if test="kline1hVolume != null">kline_1h_volume,</if>
+            <if test="kline1hTimestamp != null">kline_1h_timestamp,</if>
+            <if test="kline4hOpen != null">kline_4h_open,</if>
+            <if test="kline4hHigh != null">kline_4h_high,</if>
+            <if test="kline4hLow != null">kline_4h_low,</if>
+            <if test="kline4hClose != null">kline_4h_close,</if>
+            <if test="kline4hVolume != null">kline_4h_volume,</if>
+            <if test="kline4hTimestamp != null">kline_4h_timestamp,</if>
+            <if test="kline1dOpen != null">kline_1d_open,</if>
+            <if test="kline1dHigh != null">kline_1d_high,</if>
+            <if test="kline1dLow != null">kline_1d_low,</if>
+            <if test="kline1dClose != null">kline_1d_close,</if>
+            <if test="kline1dVolume != null">kline_1d_volume,</if>
+            <if test="kline1dTimestamp != null">kline_1d_timestamp,</if>
+            <if test="fearGreedIndex != null">fear_greed_index,</if>
+            <if test="fearGreedClassification != null">fear_greed_classification,</if>
+            <if test="exchangeInflow != null">exchange_inflow,</if>
+            <if test="exchangeOutflow != null">exchange_outflow,</if>
+            <if test="netFlow != null">net_flow,</if>
+            <if test="whaleTransactions != null">whale_transactions,</if>
+            <if test="dataSource != null">data_source,</if>
+            <if test="rawData != null">raw_data,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="symbol != null and symbol != ''">#{symbol},</if>
+            <if test="timestamp != null">#{timestamp},</if>
+            <if test="collectionTime != null">#{collectionTime},</if>
+            <if test="price != null">#{price},</if>
+            <if test="priceChange24h != null">#{priceChange24h},</if>
+            <if test="priceChangePercent24h != null">#{priceChangePercent24h},</if>
+            <if test="volume24h != null">#{volume24h},</if>
+            <if test="volume24hBase != null">#{volume24hBase},</if>
+            <if test="high24h != null">#{high24h},</if>
+            <if test="low24h != null">#{low24h},</if>
+            <if test="kline1hOpen != null">#{kline1hOpen},</if>
+            <if test="kline1hHigh != null">#{kline1hHigh},</if>
+            <if test="kline1hLow != null">#{kline1hLow},</if>
+            <if test="kline1hClose != null">#{kline1hClose},</if>
+            <if test="kline1hVolume != null">#{kline1hVolume},</if>
+            <if test="kline1hTimestamp != null">#{kline1hTimestamp},</if>
+            <if test="kline4hOpen != null">#{kline4hOpen},</if>
+            <if test="kline4hHigh != null">#{kline4hHigh},</if>
+            <if test="kline4hLow != null">#{kline4hLow},</if>
+            <if test="kline4hClose != null">#{kline4hClose},</if>
+            <if test="kline4hVolume != null">#{kline4hVolume},</if>
+            <if test="kline4hTimestamp != null">#{kline4hTimestamp},</if>
+            <if test="kline1dOpen != null">#{kline1dOpen},</if>
+            <if test="kline1dHigh != null">#{kline1dHigh},</if>
+            <if test="kline1dLow != null">#{kline1dLow},</if>
+            <if test="kline1dClose != null">#{kline1dClose},</if>
+            <if test="kline1dVolume != null">#{kline1dVolume},</if>
+            <if test="kline1dTimestamp != null">#{kline1dTimestamp},</if>
+            <if test="fearGreedIndex != null">#{fearGreedIndex},</if>
+            <if test="fearGreedClassification != null">#{fearGreedClassification},</if>
+            <if test="exchangeInflow != null">#{exchangeInflow},</if>
+            <if test="exchangeOutflow != null">#{exchangeOutflow},</if>
+            <if test="netFlow != null">#{netFlow},</if>
+            <if test="whaleTransactions != null">#{whaleTransactions},</if>
+            <if test="dataSource != null">#{dataSource},</if>
+            <if test="rawData != null">#{rawData},</if>
+        </trim>
+    </insert>
+
+    <insert id="batchInsertMarketData">
+        insert into market_data (
+            symbol, timestamp, collection_time,
+            price, price_change_24h, price_change_percent_24h,
+            volume_24h, volume_24h_base, high_24h, low_24h,
+            kline_1h_open, kline_1h_high, kline_1h_low, kline_1h_close, kline_1h_volume, kline_1h_timestamp,
+            kline_4h_open, kline_4h_high, kline_4h_low, kline_4h_close, kline_4h_volume, kline_4h_timestamp,
+            kline_1d_open, kline_1d_high, kline_1d_low, kline_1d_close, kline_1d_volume, kline_1d_timestamp,
+            fear_greed_index, fear_greed_classification,
+            exchange_inflow, exchange_outflow, net_flow, whale_transactions,
+            data_source, raw_data
+        ) values
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.symbol}, #{item.timestamp}, #{item.collectionTime},
+                #{item.price}, #{item.priceChange24h}, #{item.priceChangePercent24h},
+                #{item.volume24h}, #{item.volume24hBase}, #{item.high24h}, #{item.low24h},
+                #{item.kline1hOpen}, #{item.kline1hHigh}, #{item.kline1hLow}, #{item.kline1hClose}, #{item.kline1hVolume}, #{item.kline1hTimestamp},
+                #{item.kline4hOpen}, #{item.kline4hHigh}, #{item.kline4hLow}, #{item.kline4hClose}, #{item.kline4hVolume}, #{item.kline4hTimestamp},
+                #{item.kline1dOpen}, #{item.kline1dHigh}, #{item.kline1dLow}, #{item.kline1dClose}, #{item.kline1dVolume}, #{item.kline1dTimestamp},
+                #{item.fearGreedIndex}, #{item.fearGreedClassification},
+                #{item.exchangeInflow}, #{item.exchangeOutflow}, #{item.netFlow}, #{item.whaleTransactions},
+                #{item.dataSource}, #{item.rawData}
+            )
+        </foreach>
+    </insert>
+
+    <delete id="deleteOldData">
+        delete from market_data
+        where symbol = #{symbol}
+        and collection_time &lt; #{beforeTime}
+    </delete>
+
+    <select id="selectDistinctSymbols" resultType="String">
+        select distinct symbol from market_data order by symbol
+    </select>
+
+    <select id="selectLatestFearGreedIndex" resultMap="MarketDataResult">
+        <include refid="selectMarketDataVo"/>
+        where fear_greed_index is not null
+        order by timestamp desc
+        limit 1
+    </select>
+
+</mapper>

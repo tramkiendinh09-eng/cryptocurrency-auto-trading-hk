@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.MarketDataCollectLogMapper">
+
+    <resultMap type="com.ruoyi.dca.domain.MarketDataCollectLog" id="MarketDataCollectLogResult">
+        <result property="id" column="id"/>
+        <result property="symbol" column="symbol"/>
+        <result property="collectType" column="collect_type"/>
+        <result property="status" column="status"/>
+        <result property="successCount" column="success_count"/>
+        <result property="failCount" column="fail_count"/>
+        <result property="durationMs" column="duration_ms"/>
+        <result property="errorMessage" column="error_message"/>
+        <result property="dataSourcesUsed" column="data_sources_used"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <sql id="selectMarketDataCollectLogVo">
+        select id, symbol, collect_type, status, success_count, fail_count,
+               duration_ms, error_message, data_sources_used, create_time
+        from market_data_collect_log
+    </sql>
+
+    <select id="selectMarketDataCollectLogById" parameterType="Long" resultMap="MarketDataCollectLogResult">
+        <include refid="selectMarketDataCollectLogVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectMarketDataCollectLogList" parameterType="com.ruoyi.dca.domain.MarketDataCollectLog" resultMap="MarketDataCollectLogResult">
+        <include refid="selectMarketDataCollectLogVo"/>
+        <where>
+            <if test="symbol != null and symbol != ''">
+                AND symbol like concat('%', #{symbol}, '%')
+            </if>
+            <if test="collectType != null and collectType != ''">
+                AND collect_type = #{collectType}
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+    <insert id="insertMarketDataCollectLog" parameterType="com.ruoyi.dca.domain.MarketDataCollectLog" useGeneratedKeys="true" keyProperty="id">
+        insert into market_data_collect_log
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="symbol != null and symbol != ''">symbol,</if>
+            <if test="collectType != null and collectType != ''">collect_type,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="successCount != null">success_count,</if>
+            <if test="failCount != null">fail_count,</if>
+            <if test="durationMs != null">duration_ms,</if>
+            <if test="errorMessage != null">error_message,</if>
+            <if test="dataSourcesUsed != null">data_sources_used,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="symbol != null and symbol != ''">#{symbol},</if>
+            <if test="collectType != null and collectType != ''">#{collectType},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="successCount != null">#{successCount},</if>
+            <if test="failCount != null">#{failCount},</if>
+            <if test="durationMs != null">#{durationMs},</if>
+            <if test="errorMessage != null">#{errorMessage},</if>
+            <if test="dataSourcesUsed != null">#{dataSourcesUsed},</if>
+        </trim>
+    </insert>
+
+    <update id="updateMarketDataCollectLog" parameterType="com.ruoyi.dca.domain.MarketDataCollectLog">
+        update market_data_collect_log
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="symbol != null and symbol != ''">symbol = #{symbol},</if>
+            <if test="collectType != null and collectType != ''">collect_type = #{collectType},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="successCount != null">success_count = #{successCount},</if>
+            <if test="failCount != null">fail_count = #{failCount},</if>
+            <if test="durationMs != null">duration_ms = #{durationMs},</if>
+            <if test="errorMessage != null">error_message = #{errorMessage},</if>
+            <if test="dataSourcesUsed != null">data_sources_used = #{dataSourcesUsed},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteMarketDataCollectLogById" parameterType="Long">
+        delete from market_data_collect_log where id = #{id}
+    </delete>
+
+    <delete id="deleteMarketDataCollectLogByIds" parameterType="String">
+        delete from market_data_collect_log where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <delete id="cleanOldLogs" parameterType="int">
+        delete from market_data_collect_log
+        where create_time &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+    </delete>
+
+</mapper>

@@ -1,0 +1,548 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.TradeRuntimeOverviewMapper">
+
+    <sql id="overviewDecisionExecutionStatusExpr">
+        case
+            when dr.execution_status is not null and dr.execution_status != '' then lower(dr.execution_status)
+            when eo.status is not null and eo.status != '' then lower(eo.status)
+            when coalesce(dr.order_status, eo.order_status) = 'FILLED' then 'filled'
+            when coalesce(dr.order_status, eo.order_status) = 'PARTIALLY_FILLED' then 'partial'
+            when coalesce(dr.order_status, eo.order_status) = 'CANCELED' then 'canceled'
+            when coalesce(dr.order_status, eo.order_status) = 'EXPIRED' then 'expired'
+            when coalesce(dr.order_status, eo.order_status) = 'REJECTED' then 'failed'
+            when coalesce(dr.order_status, eo.order_status) = 'BLOCKED' then 'blocked'
+            when coalesce(dr.order_status, eo.order_status) = 'SKIPPED' then 'skipped'
+            when coalesce(dr.order_status, eo.order_status) = 'SUBMITTED' then 'submitted'
+            else 'pending'
+        end
+    </sql>
+
+    <sql id="overviewExchangeExecutionStatusExpr">
+        case
+            when status is not null and status != '' then lower(status)
+            when order_status = 'FILLED' then 'filled'
+            when order_status = 'PARTIALLY_FILLED' then 'partial'
+            when order_status = 'CANCELED' then 'canceled'
+            when order_status = 'EXPIRED' then 'expired'
+            when order_status = 'REJECTED' then 'failed'
+            when order_status = 'BLOCKED' then 'blocked'
+            when order_status = 'SKIPPED' then 'skipped'
+            when order_status = 'SUBMITTED' then 'submitted'
+            else 'pending'
+        end
+    </sql>
+
+    <sql id="overviewTradePositionSideExpr">
+        case lower(coalesce(ps.side, eo.position_side, eo.side))
+            when 'buy' then 'long'
+            when 'sell' then 'short'
+            else lower(coalesce(ps.side, eo.position_side, eo.side))
+        end
+    </sql>
+
+    <sql id="overviewTradeActionExpr">
+        coalesce(
+            eo.action,
+            case
+                when pcl.change_type = 'CLOSE' then 'CLOSE'
+                when pcl.change_type = 'REDUCE' then 'REDUCE'
+                when pcl.change_type = 'OPEN' and <include refid="overviewTradePositionSideExpr"/> = 'short' then 'OPEN_SHORT'
+                when pcl.change_type = 'OPEN' then 'OPEN_LONG'
+                when pcl.change_type = 'ADD' and <include refid="overviewTradePositionSideExpr"/> = 'short' then 'ADD_SHORT'
+                when pcl.change_type = 'ADD' then 'ADD_LONG'
+                else null
+            end
+        )
+    </sql>
+
+    <select id="countEventRaws" resultType="long">
+        select count(1) from event_raw
+    </select>
+
+    <select id="countSignalEvents" resultType="long">
+        select count(1) from signal_event
+    </select>
+
+    <select id="countDecisionRuns" resultType="long">
+        select count(1) from decision_run
+    </select>
+
+    <select id="countRiskGuardHits" resultType="long">
+        select count(1) from risk_guard_hit
+    </select>
+
+    <select id="countActivePositions" resultType="long">
+        select count(1)
+        from position_snapshot ps
+        inner join (
+            select max(id) as latestId
+            from position_snapshot
+            group by exchange_code,
+                     symbol,
+                     case lower(side)
+                         when 'buy' then 'long'
+                         when 'sell' then 'short'
+                         else lower(side)
+                     end
+        ) latest on latest.latestId = ps.id
+        where ps.position_quantity > 0
+    </select>
+
+    <select id="sumTotalUnrealizedPnl" resultType="java.math.BigDecimal">
+        select coalesce(sum(ps.unrealized_pnl), 0)
+        from position_snapshot ps
+        inner join (
+            select max(id) as latestId
+            from position_snapshot
+            group by exchange_code,
+                     symbol,
+                     case lower(side)
+                         when 'buy' then 'long'
+                         when 'sell' then 'short'
+                         else lower(side)
+                     end
+        ) latest on latest.latestId = ps.id
+        where ps.position_quantity > 0
+    </select>
+
+    <select id="selectLatestPnlSnapshot" resultType="com.ruoyi.dca.domain.pnl.PnlSnapshot">
+        select
+            id,
+            trace_id as traceId,
+            mode,
+            account_equity as accountEquity,
+            unrealized_pnl as unrealizedPnl,
+            realized_pnl as realizedPnl,
+            daily_pnl as dailyPnl,
+            max_drawdown_pct as maxDrawdownPct,
+            peak_account_equity as peakAccountEquity,
+            created_at as createdAt
+        from pnl_snapshot
+        order by id desc
+        limit 1
+    </select>
+
+    <select id="selectLatestDecisionRun" resultType="com.ruoyi.dca.domain.decision.DecisionRun">
+        select
+            dr.id,
+            dr.trace_id as traceId,
+            dr.symbol,
+            dr.mode,
+            dr.action,
+            dr.confidence,
+            dr.summary_reason as summaryReason,
+            dr.model_code as modelCode,
+            dr.model_provider as modelProvider,
+            dr.trigger_reason as triggerReason,
+            dr.trigger_source as triggerSource,
+            dr.dispatch_mode as dispatchMode,
+            dr.selected_agents_json as selectedAgentsJson,
+            dr.combination_match_json as combinationMatchJson,
+            dr.active_signal_refs_json as activeSignalRefsJson,
+            dr.cooldown_blocked as cooldownBlocked,
+            dr.budget_blocked as budgetBlocked,
+            <include refid="overviewDecisionExecutionStatusExpr"/> as executionStatus,
+            coalesce(dr.order_status, eo.order_status) as orderStatus,
+            dr.created_at as createdAt
+        from decision_run dr
+        left join exchange_order eo on eo.id = (
+            select max(inner_eo.id)
+            from exchange_order inner_eo
+            where inner_eo.trace_id = dr.trace_id
+        )
+        order by dr.id desc
+        limit 1
+    </select>
+
+    <select id="selectRecentEventRaws" resultType="com.ruoyi.dca.domain.event.EventRaw">
+        select
+            id,
+            trace_id as traceId,
+            event_type as eventType,
+            symbol,
+            exchange_code as exchangeCode,
+            payload_json as payloadJson,
+            created_at as createdAt
+        from event_raw
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectRecentSignalEvents" resultType="com.ruoyi.dca.domain.decision.SignalEvent">
+        select
+            id,
+            trace_id as traceId,
+            symbol,
+            signal_type as signalType,
+            feature_json as featureJson,
+            created_at as createdAt
+        from signal_event
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectActiveSignalWindows" resultType="com.ruoyi.dca.domain.decision.SignalWindowState">
+        select
+            id,
+            trace_id as traceId,
+            symbol,
+            window_key as windowKey,
+            source_type as sourceType,
+            signal_type as signalType,
+            direction,
+            strength_score as strengthScore,
+            decay_score as decayScore,
+            opened_at as openedAt,
+            expires_at as expiresAt,
+            last_event_at as lastEventAt,
+            last_confirmed_at as lastConfirmedAt,
+            dedupe_key as dedupeKey,
+            combine_until_at as combineUntilAt,
+            is_active as active,
+            state_json as stateJson,
+            created_at as createdAt
+        from signal_window_state
+        where is_active = 1
+          and (expires_at is null or expires_at >= #{currentTime})
+        order by coalesce(last_event_at, created_at) desc, id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectRecentAgentConclusions" resultType="com.ruoyi.dca.domain.decision.AgentConclusion">
+        select
+            id,
+            trace_id as traceId,
+            agent_name as agentName,
+            bias,
+            confidence,
+            reason,
+            created_at as createdAt
+        from agent_conclusion
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectRecentDecisionRuns" resultType="com.ruoyi.dca.domain.decision.DecisionRun">
+        select
+            dr.id,
+            dr.trace_id as traceId,
+            dr.symbol,
+            dr.mode,
+            dr.action,
+            dr.confidence,
+            dr.summary_reason as summaryReason,
+            dr.model_code as modelCode,
+            dr.model_provider as modelProvider,
+            <include refid="overviewDecisionExecutionStatusExpr"/> as executionStatus,
+            coalesce(dr.order_status, eo.order_status) as orderStatus,
+            dr.created_at as createdAt
+        from decision_run dr
+        left join exchange_order eo on eo.id = (
+            select max(inner_eo.id)
+            from exchange_order inner_eo
+            where inner_eo.trace_id = dr.trace_id
+        )
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectRecentRiskGuardHits" resultType="com.ruoyi.dca.domain.risk.RiskGuardHit">
+        select
+            id,
+            trace_id as traceId,
+            rule_code as ruleCode,
+            reason,
+            created_at as createdAt
+        from risk_guard_hit
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectRecentExchangeFills" resultType="com.ruoyi.dca.domain.order.ExchangeFill">
+        select
+            id,
+            trace_id as traceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            position_side as positionSide,
+            order_ref as orderRef,
+            trade_id as tradeId,
+            fill_price as fillPrice,
+            fill_quantity as fillQuantity,
+            fee,
+            fee_ccy as feeCcy,
+            is_maker as isMaker,
+            exec_type as execType,
+            realized_pnl as realizedPnl,
+            filled_at as filledAt,
+            raw_payload as rawPayload,
+            created_at as createdAt
+        from exchange_fill
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectRecentTradeActionSummaries" resultType="com.ruoyi.dca.domain.trade.TradeActionSummary">
+        select
+            eo.trace_id as traceId,
+            eo.exchange_code as exchangeCode,
+            eo.symbol,
+            eo.mode,
+            <include refid="overviewTradeActionExpr"/> as action,
+            eo.side,
+            <include refid="overviewTradePositionSideExpr"/> as positionSide,
+            eo.order_ref as orderRef,
+            pcl.change_type as changeType,
+            ef.fill_price as fillPrice,
+            ef.fill_quantity as fillQuantity,
+            case
+                when <include refid="overviewTradeActionExpr"/> in ('CLOSE', 'REDUCE') then prev.entry_price
+                when <include refid="overviewTradeActionExpr"/> in ('OPEN_LONG', 'OPEN_SHORT', 'ADD_LONG', 'ADD_SHORT') then ef.fill_price
+                else null
+            end as openPrice,
+            case
+                when <include refid="overviewTradeActionExpr"/> in ('CLOSE', 'REDUCE') then ef.fill_price
+                else null
+            end as closePrice,
+            ps.entry_price as entryPrice,
+            ps.position_quantity as positionQuantity,
+            case
+                when <include refid="overviewTradeActionExpr"/> in ('CLOSE', 'REDUCE')
+                     and prev.entry_price is not null
+                     and ef.fill_price is not null
+                     and pcl.before_quantity is not null
+                     and pcl.after_quantity is not null
+                then round(
+                    (
+                        case
+                            when <include refid="overviewTradePositionSideExpr"/> = 'short'
+                            then prev.entry_price - ef.fill_price
+                            else ef.fill_price - prev.entry_price
+                        end
+                    ) * (
+                        case
+                            when pcl.before_quantity > pcl.after_quantity then pcl.before_quantity - pcl.after_quantity
+                            else 0
+                        end
+                    ),
+                    8
+                )
+                else 0
+            end as realizedPnl,
+            <include refid="overviewExchangeExecutionStatusExpr"/> as executionStatus,
+            eo.order_status as orderStatus,
+            coalesce(ef.created_at, eo.created_at) as createdAt
+        from exchange_order eo
+        left join exchange_fill ef on ef.id = (
+            select max(inner_ef.id)
+            from exchange_fill inner_ef
+            where inner_ef.trace_id = eo.trace_id
+              and inner_ef.order_ref = eo.order_ref
+        )
+        left join position_snapshot ps on ps.id = (
+            select max(inner_ps.id)
+            from position_snapshot inner_ps
+            where inner_ps.trace_id = eo.trace_id
+        )
+        left join position_change_log pcl on pcl.id = (
+            select max(inner_pcl.id)
+            from position_change_log inner_pcl
+            where inner_pcl.trace_id = eo.trace_id
+        )
+        left join position_snapshot prev on prev.id = (
+            select max(inner_prev.id)
+            from position_snapshot inner_prev
+            where inner_prev.exchange_code = coalesce(ps.exchange_code, eo.exchange_code)
+              and inner_prev.symbol = coalesce(ps.symbol, eo.symbol)
+              and case lower(inner_prev.side)
+                    when 'buy' then 'long'
+                    when 'sell' then 'short'
+                    else lower(inner_prev.side)
+                  end = case lower(coalesce(ps.side, eo.position_side, eo.side))
+                    when 'buy' then 'long'
+                    when 'sell' then 'short'
+                    else lower(coalesce(ps.side, eo.position_side, eo.side))
+                  end
+              and (ps.id is null or inner_prev.id &lt; ps.id)
+        )
+        where ef.id is not null
+        order by coalesce(ef.created_at, eo.created_at) desc, eo.id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectTradeActionSummariesAfter" resultType="com.ruoyi.dca.domain.trade.TradeActionSummary">
+        select
+            eo.trace_id as traceId,
+            eo.exchange_code as exchangeCode,
+            eo.symbol,
+            eo.mode,
+            <include refid="overviewTradeActionExpr"/> as action,
+            eo.side,
+            <include refid="overviewTradePositionSideExpr"/> as positionSide,
+            eo.order_ref as orderRef,
+            pcl.change_type as changeType,
+            ef.fill_price as fillPrice,
+            ef.fill_quantity as fillQuantity,
+            case
+                when <include refid="overviewTradeActionExpr"/> in ('CLOSE', 'REDUCE') then prev.entry_price
+                when <include refid="overviewTradeActionExpr"/> in ('OPEN_LONG', 'OPEN_SHORT', 'ADD_LONG', 'ADD_SHORT') then ef.fill_price
+                else null
+            end as openPrice,
+            case
+                when <include refid="overviewTradeActionExpr"/> in ('CLOSE', 'REDUCE') then ef.fill_price
+                else null
+            end as closePrice,
+            ps.entry_price as entryPrice,
+            ps.position_quantity as positionQuantity,
+            case
+                when <include refid="overviewTradeActionExpr"/> in ('CLOSE', 'REDUCE')
+                     and prev.entry_price is not null
+                     and ef.fill_price is not null
+                     and pcl.before_quantity is not null
+                     and pcl.after_quantity is not null
+                then round(
+                    (
+                        case
+                            when <include refid="overviewTradePositionSideExpr"/> = 'short'
+                            then prev.entry_price - ef.fill_price
+                            else ef.fill_price - prev.entry_price
+                        end
+                    ) * (
+                        case
+                            when pcl.before_quantity > pcl.after_quantity then pcl.before_quantity - pcl.after_quantity
+                            else 0
+                        end
+                    ),
+                    8
+                )
+                else 0
+            end as realizedPnl,
+            <include refid="overviewExchangeExecutionStatusExpr"/> as executionStatus,
+            eo.order_status as orderStatus,
+            coalesce(ef.created_at, eo.created_at) as createdAt
+        from exchange_order eo
+        left join exchange_fill ef on ef.id = (
+            select max(inner_ef.id)
+            from exchange_fill inner_ef
+            where inner_ef.trace_id = eo.trace_id
+              and inner_ef.order_ref = eo.order_ref
+        )
+        left join position_snapshot ps on ps.id = (
+            select max(inner_ps.id)
+            from position_snapshot inner_ps
+            where inner_ps.trace_id = eo.trace_id
+        )
+        left join position_change_log pcl on pcl.id = (
+            select max(inner_pcl.id)
+            from position_change_log inner_pcl
+            where inner_pcl.trace_id = eo.trace_id
+        )
+        left join position_snapshot prev on prev.id = (
+            select max(inner_prev.id)
+            from position_snapshot inner_prev
+            where inner_prev.exchange_code = coalesce(ps.exchange_code, eo.exchange_code)
+              and inner_prev.symbol = coalesce(ps.symbol, eo.symbol)
+              and case lower(inner_prev.side)
+                    when 'buy' then 'long'
+                    when 'sell' then 'short'
+                    else lower(inner_prev.side)
+                  end = <include refid="overviewTradePositionSideExpr"/>
+              and (ps.id is null or inner_prev.id &lt; ps.id)
+        )
+        where ef.id is not null
+          and coalesce(ef.created_at, eo.created_at) &gt; #{createdAt}
+        order by coalesce(ef.created_at, eo.created_at) asc, eo.id asc
+    </select>
+
+    <select id="selectRecentExchangeOrders" resultType="com.ruoyi.dca.domain.order.ExchangeOrder">
+        select
+            id,
+            trace_id as traceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            mode,
+            order_ref as orderRef,
+            client_order_id as clientOrderId,
+            action,
+            order_type as orderType,
+            position_side as positionSide,
+            reduce_only as reduceOnly,
+            td_mode as tdMode,
+            leverage,
+            limit_price as limitPrice,
+            quantity_base as quantityBase,
+            okx_enhanced_execution as okxEnhancedExecution,
+            filled_quantity as filledQuantity,
+            avg_fill_price as avgFillPrice,
+            fee,
+            fee_ccy as feeCcy,
+            post_only as postOnly,
+            <include refid="overviewExchangeExecutionStatusExpr"/> as status,
+            <include refid="overviewExchangeExecutionStatusExpr"/> as executionStatus,
+            order_status as orderStatus,
+            created_at as createdAt,
+            updated_at as updatedAt,
+            filled_at as filledAt,
+            raw_payload as rawPayload
+        from exchange_order
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectRecentPositionSnapshots" resultType="com.ruoyi.dca.domain.position.PositionSnapshot">
+        select
+            ps.id,
+            ps.exchange_code as exchangeCode,
+            ps.symbol,
+            case lower(ps.side)
+                when 'buy' then 'long'
+                when 'sell' then 'short'
+                else lower(ps.side)
+            end as side,
+            ps.position_quantity as positionQuantity,
+            ps.entry_price as entryPrice,
+            ps.unrealized_pnl as unrealizedPnl,
+            ps.created_at as createdAt
+        from position_snapshot ps
+        inner join (
+            select max(id) as latestId
+            from position_snapshot
+            group by exchange_code,
+                     symbol,
+                     case lower(side)
+                         when 'buy' then 'long'
+                         when 'sell' then 'short'
+                         else lower(side)
+                     end
+        ) latest on latest.latestId = ps.id
+        where ps.position_quantity > 0
+        order by ps.created_at desc, ps.id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectExecutionStatusCounts" resultType="java.util.HashMap">
+        select
+            <include refid="overviewExchangeExecutionStatusExpr"/> as "executionStatus",
+            count(*) as "total"
+        from exchange_order
+        group by <include refid="overviewExchangeExecutionStatusExpr"/>
+    </select>
+
+    <select id="countCooldownBlockedDecisionRuns" resultType="long">
+        select count(1)
+        from decision_run
+        where cooldown_blocked = 1
+    </select>
+
+    <select id="countBudgetBlockedDecisionRuns" resultType="long">
+        select count(1)
+        from decision_run
+        where budget_blocked = 1
+    </select>
+
+</mapper>

@@ -1,0 +1,493 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.decision.DecisionAuditMapper">
+
+    <sql id="decisionExecutionStatusExpr">
+        case
+            when dr.execution_status is not null and dr.execution_status != '' then lower(dr.execution_status)
+            when eo.status is not null and eo.status != '' then lower(eo.status)
+            when coalesce(dr.order_status, eo.order_status) = 'FILLED' then 'filled'
+            when coalesce(dr.order_status, eo.order_status) = 'PARTIALLY_FILLED' then 'partial'
+            when coalesce(dr.order_status, eo.order_status) = 'CANCELED' then 'canceled'
+            when coalesce(dr.order_status, eo.order_status) = 'EXPIRED' then 'expired'
+            when coalesce(dr.order_status, eo.order_status) = 'REJECTED' then 'failed'
+            when coalesce(dr.order_status, eo.order_status) = 'BLOCKED' then 'blocked'
+            when coalesce(dr.order_status, eo.order_status) = 'SKIPPED' then 'skipped'
+            when coalesce(dr.order_status, eo.order_status) = 'SUBMITTED' then 'submitted'
+            else 'pending'
+        end
+    </sql>
+
+    <insert id="insertSignalEvent" parameterType="com.ruoyi.dca.domain.decision.SignalEvent" useGeneratedKeys="true" keyProperty="id">
+        insert into signal_event (
+            trace_id,
+            symbol,
+            signal_type,
+            feature_json,
+            created_at
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{signalType},
+            #{featureJson},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertFeatureSnapshot" parameterType="com.ruoyi.dca.domain.decision.FeatureSnapshot" useGeneratedKeys="true" keyProperty="id">
+        insert into feature_snapshot (
+            trace_id,
+            symbol,
+            event_strength,
+            snapshot_json,
+            created_at
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{eventStrength},
+            #{snapshotJson},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertSignalScore" parameterType="com.ruoyi.dca.domain.decision.SignalScore" useGeneratedKeys="true" keyProperty="id">
+        insert into signal_score (
+            signal_event_id,
+            trace_id,
+            signal_type,
+            score,
+            created_at
+        ) values (
+            #{signalEventId},
+            #{traceId},
+            #{signalType},
+            #{score},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertSignalWindowState" parameterType="com.ruoyi.dca.domain.decision.SignalWindowState" useGeneratedKeys="true" keyProperty="id">
+        insert into signal_window_state (
+            trace_id,
+            symbol,
+            window_key,
+            source_type,
+            signal_type,
+            direction,
+            strength_score,
+            decay_score,
+            opened_at,
+            expires_at,
+            last_event_at,
+            last_confirmed_at,
+            dedupe_key,
+            combine_until_at,
+            is_active,
+            state_json,
+            created_at
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{windowKey},
+            #{sourceType},
+            #{signalType},
+            #{direction},
+            #{strengthScore},
+            #{decayScore},
+            #{openedAt},
+            #{expiresAt},
+            #{lastEventAt},
+            #{lastConfirmedAt},
+            #{dedupeKey},
+            #{combineUntilAt},
+            #{active},
+            #{stateJson},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <update id="deactivateExpiredSignalWindowStates">
+        update signal_window_state
+        set is_active = false
+        where symbol = #{symbol}
+          and is_active = true
+          and expires_at is not null
+          and expires_at &lt; #{currentTime}
+    </update>
+
+    <insert id="insertAgentRun" parameterType="com.ruoyi.dca.domain.decision.AgentRun" useGeneratedKeys="true" keyProperty="id">
+        insert into agent_run (
+            trace_id,
+            symbol,
+            agent_name,
+            event_strength,
+            status,
+            created_at
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{agentName},
+            #{eventStrength},
+            #{status},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertAgentObservation" parameterType="com.ruoyi.dca.domain.decision.AgentObservation" useGeneratedKeys="true" keyProperty="id">
+        insert into agent_observation (
+            agent_run_id,
+            trace_id,
+            agent_name,
+            observation_type,
+            observation_json,
+            created_at
+        ) values (
+            #{agentRunId},
+            #{traceId},
+            #{agentName},
+            #{observationType},
+            #{observationJson},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertAgentConclusion" parameterType="com.ruoyi.dca.domain.decision.AgentConclusion" useGeneratedKeys="true" keyProperty="id">
+        insert into agent_conclusion (
+            trace_id,
+            agent_name,
+            bias,
+            confidence,
+            reason,
+            created_at
+        ) values (
+            #{traceId},
+            #{agentName},
+            #{bias},
+            #{confidence},
+            #{reason},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertDecisionRun" parameterType="com.ruoyi.dca.domain.decision.DecisionRun" useGeneratedKeys="true" keyProperty="id">
+        insert into decision_run (
+            trace_id,
+            symbol,
+            mode,
+            action,
+            confidence,
+            summary_reason,
+            model_code,
+            model_provider,
+            prompt_source,
+            binding_template_code,
+            fallback_template_code,
+            resolved_template_code,
+            prompt_template_fallback_used,
+            trigger_reason,
+            trigger_source,
+            dispatch_mode,
+            selected_agents_json,
+            combination_match_json,
+            active_signal_refs_json,
+            cooldown_blocked,
+            budget_blocked,
+            execution_status,
+            order_status,
+            trade_memory_status_json,
+            lifecycle_status_json,
+            created_at
+        ) values (
+            #{traceId},
+            #{symbol},
+            #{mode},
+            #{action},
+            #{confidence},
+            #{summaryReason},
+            #{modelCode},
+            #{modelProvider},
+            #{promptSource},
+            #{bindingTemplateCode},
+            #{fallbackTemplateCode},
+            #{resolvedTemplateCode},
+            #{promptTemplateFallbackUsed},
+            #{triggerReason},
+            #{triggerSource},
+            #{dispatchMode},
+            #{selectedAgentsJson},
+            #{combinationMatchJson},
+            #{activeSignalRefsJson},
+            #{cooldownBlocked},
+            #{budgetBlocked},
+            #{executionStatus},
+            #{orderStatus},
+            #{tradeMemoryStatusJson},
+            #{lifecycleStatusJson},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertAgentMessage" parameterType="com.ruoyi.dca.domain.decision.AgentMessage" useGeneratedKeys="true" keyProperty="id">
+        insert into agent_message (
+            trace_id,
+            agent_run_id,
+            round_no,
+            speaker_agent,
+            target_agent,
+            message_type,
+            template_code,
+            model_code,
+            content_json,
+            summary_text,
+            created_at
+        ) values (
+            #{traceId},
+            #{agentRunId},
+            #{roundNo},
+            #{speakerAgent},
+            #{targetAgent},
+            #{messageType},
+            #{templateCode},
+            #{modelCode},
+            #{contentJson},
+            #{summaryText},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertDecisionAction" parameterType="com.ruoyi.dca.domain.decision.DecisionAction" useGeneratedKeys="true" keyProperty="id">
+        insert into decision_action (
+            decision_run_id,
+            trace_id,
+            action,
+            side,
+            order_ref,
+            execution_status,
+            order_status,
+            created_at
+        ) values (
+            #{decisionRunId},
+            #{traceId},
+            #{action},
+            #{side},
+            #{orderRef},
+            #{executionStatus},
+            #{orderStatus},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <select id="selectDecisionRunsBase" resultType="com.ruoyi.dca.domain.decision.DecisionRun">
+        select
+            dr.id,
+            dr.trace_id as traceId,
+            dr.symbol,
+            dr.mode,
+            dr.action,
+            dr.confidence,
+            dr.summary_reason as summaryReason,
+            dr.model_code as modelCode,
+            dr.model_provider as modelProvider,
+            dr.prompt_source as promptSource,
+            dr.binding_template_code as bindingTemplateCode,
+            dr.fallback_template_code as fallbackTemplateCode,
+            dr.resolved_template_code as resolvedTemplateCode,
+            dr.prompt_template_fallback_used as promptTemplateFallbackUsed,
+            dr.trigger_reason as triggerReason,
+            dr.trigger_source as triggerSource,
+            dr.dispatch_mode as dispatchMode,
+            dr.selected_agents_json as selectedAgentsJson,
+            dr.combination_match_json as combinationMatchJson,
+            dr.active_signal_refs_json as activeSignalRefsJson,
+            dr.cooldown_blocked as cooldownBlocked,
+            dr.budget_blocked as budgetBlocked,
+            dr.execution_status as executionStatus,
+            dr.order_status as orderStatus,
+            dr.created_at as createdAt
+        from decision_run dr
+        order by dr.id desc
+    </select>
+
+    <select id="selectDecisionRuns" resultType="com.ruoyi.dca.domain.decision.DecisionRun">
+        select
+            dr.id,
+            dr.trace_id as traceId,
+            dr.symbol,
+            dr.mode,
+            dr.action,
+            dr.confidence,
+            dr.summary_reason as summaryReason,
+            dr.model_code as modelCode,
+            dr.model_provider as modelProvider,
+            dr.prompt_source as promptSource,
+            dr.binding_template_code as bindingTemplateCode,
+            dr.fallback_template_code as fallbackTemplateCode,
+            dr.resolved_template_code as resolvedTemplateCode,
+            dr.prompt_template_fallback_used as promptTemplateFallbackUsed,
+            dr.trigger_reason as triggerReason,
+            dr.trigger_source as triggerSource,
+            dr.dispatch_mode as dispatchMode,
+            dr.selected_agents_json as selectedAgentsJson,
+            dr.combination_match_json as combinationMatchJson,
+            dr.active_signal_refs_json as activeSignalRefsJson,
+            dr.cooldown_blocked as cooldownBlocked,
+            dr.budget_blocked as budgetBlocked,
+            <include refid="decisionExecutionStatusExpr"/> as executionStatus,
+            coalesce(dr.order_status, eo.order_status) as orderStatus,
+            dr.created_at as createdAt
+        from decision_run dr
+        left join (
+            select trace_id, max(id) as latest_id
+            from exchange_order
+            group by trace_id
+        ) latest_eo on latest_eo.trace_id = dr.trace_id
+        left join exchange_order eo on eo.id = latest_eo.latest_id
+        <where>
+            <if test="executionStatus != null and executionStatus != ''">
+                <include refid="decisionExecutionStatusExpr"/> = #{executionStatus}
+            </if>
+            <if test="orderStatus != null and orderStatus != ''">
+                <if test="executionStatus != null and executionStatus != ''">
+                    and
+                </if>
+                coalesce(dr.order_status, eo.order_status) = #{orderStatus}
+            </if>
+        </where>
+        order by dr.id desc
+    </select>
+
+    <select id="selectLatestExchangeOrdersByTraceIds" resultType="com.ruoyi.dca.domain.order.ExchangeOrder">
+        select
+            eo.id,
+            eo.trace_id as traceId,
+            eo.status,
+            eo.order_status as orderStatus,
+            eo.created_at as createdAt
+        from exchange_order eo
+        inner join (
+            select trace_id, max(id) as latest_id
+            from exchange_order
+            where trace_id in
+            <foreach collection="traceIds" item="traceId" open="(" separator="," close=")">
+                #{traceId}
+            </foreach>
+            group by trace_id
+        ) latest on latest.latest_id = eo.id
+        order by eo.id desc
+    </select>
+
+    <select id="selectLatestFeatureSnapshotsByTraceIds" resultType="com.ruoyi.dca.domain.decision.FeatureSnapshot">
+        select
+            fs.id,
+            fs.trace_id as traceId,
+            fs.symbol,
+            fs.event_strength as eventStrength,
+            fs.snapshot_json as snapshotJson,
+            fs.created_at as createdAt
+        from feature_snapshot fs
+        inner join (
+            select trace_id, max(id) as max_id
+            from feature_snapshot
+            where trace_id in
+            <foreach collection="traceIds" item="traceId" open="(" separator="," close=")">
+                #{traceId}
+            </foreach>
+            group by trace_id
+        ) latest on latest.max_id = fs.id
+        order by fs.id desc
+    </select>
+
+    <select id="selectAgentMessagesByTraceIds" resultType="com.ruoyi.dca.domain.decision.AgentMessage">
+        select
+            am.id,
+            am.trace_id as traceId,
+            am.agent_run_id as agentRunId,
+            am.round_no as roundNo,
+            am.speaker_agent as speakerAgent,
+            am.target_agent as targetAgent,
+            am.message_type as messageType,
+            am.template_code as templateCode,
+            am.model_code as modelCode,
+            am.content_json as contentJson,
+            am.summary_text as summaryText,
+            am.created_at as createdAt
+        from agent_message am
+        where am.trace_id in
+        <foreach collection="traceIds" item="traceId" open="(" separator="," close=")">
+            #{traceId}
+        </foreach>
+        order by am.trace_id desc, am.round_no asc, am.id asc
+    </select>
+
+    <select id="selectRecentSupervisorDecisionMessages" resultType="com.ruoyi.dca.domain.decision.AgentMessage">
+        select
+            am.id,
+            am.trace_id as traceId,
+            am.agent_run_id as agentRunId,
+            am.round_no as roundNo,
+            am.speaker_agent as speakerAgent,
+            am.target_agent as targetAgent,
+            am.message_type as messageType,
+            am.template_code as templateCode,
+            am.model_code as modelCode,
+            am.content_json as contentJson,
+            am.summary_text as summaryText,
+            am.created_at as createdAt
+        from agent_message am
+        inner join decision_run dr on dr.trace_id = am.trace_id
+        where upper(dr.symbol) = upper(#{symbol})
+        <if test="mode != null and mode != ''">
+          and upper(dr.mode) = upper(#{mode})
+        </if>
+          and am.speaker_agent = 'supervisor_agent'
+          and am.message_type = 'final_decision'
+        <if test="excludeTraceId != null and excludeTraceId != ''">
+          and am.trace_id != #{excludeTraceId}
+        </if>
+        order by am.created_at desc, am.id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectRecentSupervisorDecisionRuns" resultType="com.ruoyi.dca.domain.decision.DecisionRun">
+        select
+            dr.id,
+            dr.trace_id as traceId,
+            dr.symbol,
+            dr.mode,
+            dr.action,
+            dr.confidence,
+            dr.summary_reason as summaryReason,
+            dr.model_code as modelCode,
+            dr.model_provider as modelProvider,
+            dr.prompt_source as promptSource,
+            dr.binding_template_code as bindingTemplateCode,
+            dr.fallback_template_code as fallbackTemplateCode,
+            dr.resolved_template_code as resolvedTemplateCode,
+            dr.prompt_template_fallback_used as promptTemplateFallbackUsed,
+            dr.trigger_reason as triggerReason,
+            dr.trigger_source as triggerSource,
+            dr.dispatch_mode as dispatchMode,
+            dr.selected_agents_json as selectedAgentsJson,
+            dr.combination_match_json as combinationMatchJson,
+            dr.active_signal_refs_json as activeSignalRefsJson,
+            dr.cooldown_blocked as cooldownBlocked,
+            dr.budget_blocked as budgetBlocked,
+            dr.execution_status as executionStatus,
+            dr.order_status as orderStatus,
+            dr.created_at as createdAt
+        from decision_run dr
+        where upper(dr.symbol) = upper(#{symbol})
+        <if test="mode != null and mode != ''">
+          and upper(dr.mode) = upper(#{mode})
+        </if>
+        <if test="excludeTraceId != null and excludeTraceId != ''">
+          and dr.trace_id != #{excludeTraceId}
+        </if>
+        order by dr.created_at desc, dr.id desc
+        limit #{limit}
+    </select>
+
+</mapper>
+

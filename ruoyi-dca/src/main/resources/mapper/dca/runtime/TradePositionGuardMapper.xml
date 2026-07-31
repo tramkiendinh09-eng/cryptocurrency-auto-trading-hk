@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.runtime.TradePositionGuardMapper">
+
+    <select id="selectEffectiveGuard" resultType="com.ruoyi.dca.domain.trade.TradePositionGuard">
+        select
+            id,
+            guard_name as guardName,
+            scope_type as scopeType,
+            strategy_id as strategyId,
+            symbol,
+            exchange_code as exchangeCode,
+            stop_loss_pct as stopLossPct,
+            take_profit_pct as takeProfitPct,
+            max_holding_minutes as maxHoldingMinutes,
+            enabled,
+            priority,
+            remark
+        from trade_position_guard
+        where enabled = 1
+          and (
+            scope_type = 'GLOBAL'
+            <if test="strategyId != null">
+              or (scope_type = 'STRATEGY' and strategy_id = #{strategyId})
+            </if>
+            <if test="symbol != null and symbol != ''">
+              or (
+                scope_type = 'SYMBOL'
+                and symbol = #{symbol}
+                <choose>
+                  <when test="exchangeCode != null and exchangeCode != ''">
+                    and (exchange_code is null or upper(exchange_code) = upper(#{exchangeCode}))
+                  </when>
+                  <otherwise>
+                    and exchange_code is null
+                  </otherwise>
+                </choose>
+              )
+            </if>
+          )
+        order by
+            case scope_type
+                when 'SYMBOL' then 3
+                when 'STRATEGY' then 2
+                else 1
+            end desc,
+            priority desc,
+            id desc
+        limit 1
+    </select>
+
+    <select id="selectCurrentPositionOpenedAt" resultType="string">
+        select date_format(min(created_at), '%Y-%m-%d %H:%i:%s')
+        from position_change_log
+        where exchange_code = #{exchangeCode}
+          and symbol = #{symbol}
+          and side = #{side}
+          and after_quantity > 0
+          and id > ifnull((
+            select max(id)
+            from position_change_log
+            where exchange_code = #{exchangeCode}
+              and symbol = #{symbol}
+              and side = #{side}
+              and after_quantity = 0
+          ), 0)
+    </select>
+</mapper>

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.MarketDataConfigMapper">
+
+    <resultMap type="com.ruoyi.dca.domain.MarketDataConfig" id="MarketDataConfigResult">
+        <result property="id" column="id"/>
+        <result property="configName" column="config_name"/>
+        <result property="symbol" column="symbol"/>
+        <result property="enabled" column="enabled"/>
+        <result property="collectInterval" column="collect_interval"/>
+        <result property="dataSources" column="data_sources"/>
+        <result property="collectKline" column="collect_kline"/>
+        <result property="klinePeriods" column="kline_periods"/>
+        <result property="collectFearGreed" column="collect_fear_greed"/>
+        <result property="collectOnchain" column="collect_onchain"/>
+        <result property="apiKeyConfig" column="api_key_config"/>
+        <result property="remark" column="remark"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="selectMarketDataConfigVo">
+        select id, config_name, symbol, enabled, collect_interval, data_sources,
+               collect_kline, kline_periods, collect_fear_greed, collect_onchain,
+               api_key_config, remark, create_by, create_time, update_by, update_time
+        from market_data_config
+    </sql>
+
+    <select id="selectMarketDataConfigList" parameterType="com.ruoyi.dca.domain.MarketDataConfig" resultMap="MarketDataConfigResult">
+        <include refid="selectMarketDataConfigVo"/>
+        <where>
+            <if test="configName != null and configName != ''">
+                and config_name like concat('%', #{configName}, '%')
+            </if>
+            <if test="symbol != null and symbol != ''">
+                and symbol = #{symbol}
+            </if>
+            <if test="enabled != null and enabled != ''">
+                and enabled = #{enabled}
+            </if>
+        </where>
+        order by id asc
+    </select>
+
+    <select id="selectMarketDataConfigById" parameterType="Long" resultMap="MarketDataConfigResult">
+        <include refid="selectMarketDataConfigVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectEnabledConfigs" resultMap="MarketDataConfigResult">
+        <include refid="selectMarketDataConfigVo"/>
+        where enabled = '1'
+        order by id asc
+    </select>
+
+    <select id="selectConfigBySymbol" parameterType="String" resultMap="MarketDataConfigResult">
+        <include refid="selectMarketDataConfigVo"/>
+        where symbol = #{symbol}
+    </select>
+
+</mapper>

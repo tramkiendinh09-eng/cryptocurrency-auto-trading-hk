@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.NotifyTemplateMapper">
+
+    <resultMap type="NotifyTemplate" id="NotifyTemplateResult">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="code" column="code"/>
+        <result property="titleTemplate" column="title_template"/>
+        <result property="contentTemplate" column="content_template"/>
+        <result property="variables" column="variables"/>
+        <result property="isActive" column="is_active"/>
+        <result property="isDefault" column="is_default"/>
+        <result property="remark" column="remark"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="selectNotifyTemplateVo">
+        select id, name, code, title_template, content_template, variables, is_active, is_default, remark,
+               create_by, create_time, update_by, update_time
+        from notify_template
+    </sql>
+
+    <select id="selectNotifyTemplateById" parameterType="Long" resultMap="NotifyTemplateResult">
+        <include refid="selectNotifyTemplateVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectNotifyTemplateList" parameterType="NotifyTemplate" resultMap="NotifyTemplateResult">
+        <include refid="selectNotifyTemplateVo"/>
+        <where>
+            <if test="name != null and name != ''">
+                and name like concat('%', #{name}, '%')
+            </if>
+            <if test="code != null and code != ''">
+                and code = #{code}
+            </if>
+            <if test="isActive != null">
+                and is_active = #{isActive}
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+    <select id="selectNotifyTemplateByCode" parameterType="String" resultMap="NotifyTemplateResult">
+        <include refid="selectNotifyTemplateVo"/>
+        where code = #{code}
+        limit 1
+    </select>
+
+    <insert id="insertNotifyTemplate" parameterType="NotifyTemplate" useGeneratedKeys="true" keyProperty="id">
+        insert into notify_template
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="name != null and name != ''">name,</if>
+            <if test="code != null and code != ''">code,</if>
+            <if test="titleTemplate != null and titleTemplate != ''">title_template,</if>
+            <if test="contentTemplate != null and contentTemplate != ''">content_template,</if>
+            <if test="variables != null">variables,</if>
+            <if test="isActive != null">is_active,</if>
+            <if test="isDefault != null">is_default,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="name != null and name != ''">#{name},</if>
+            <if test="code != null and code != ''">#{code},</if>
+            <if test="titleTemplate != null and titleTemplate != ''">#{titleTemplate},</if>
+            <if test="contentTemplate != null and contentTemplate != ''">#{contentTemplate},</if>
+            <if test="variables != null">#{variables},</if>
+            <if test="isActive != null">#{isActive},</if>
+            <if test="isDefault != null">#{isDefault},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+        </trim>
+    </insert>
+
+    <update id="updateNotifyTemplate" parameterType="NotifyTemplate">
+        update notify_template
+        <trim prefix="set" suffixOverrides=",">
+            <if test="name != null and name != ''">name = #{name},</if>
+            <if test="code != null and code != ''">code = #{code},</if>
+            <if test="titleTemplate != null and titleTemplate != ''">title_template = #{titleTemplate},</if>
+            <if test="contentTemplate != null and contentTemplate != ''">content_template = #{contentTemplate},</if>
+            <if test="variables != null">variables = #{variables},</if>
+            <if test="isActive != null">is_active = #{isActive},</if>
+            <if test="isDefault != null">is_default = #{isDefault},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteNotifyTemplateByIds" parameterType="Long">
+        delete from notify_template where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

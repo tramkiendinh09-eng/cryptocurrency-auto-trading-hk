@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.TradeAgentProfileMapper">
+
+    <resultMap id="TradeAgentProfileResult" type="com.ruoyi.dca.domain.trade.TradeAgentProfile">
+        <id property="id" column="id"/>
+        <result property="agentCode" column="agent_code"/>
+        <result property="agentName" column="agent_name"/>
+        <result property="agentType" column="agent_type"/>
+        <result property="enabled" column="enabled"/>
+        <result property="llmEnabled" column="llm_enabled"/>
+        <result property="defaultModelId" column="default_model_id"/>
+        <result property="defaultTemplateCode" column="default_template_code"/>
+        <result property="defaultFallbackTemplateCode" column="default_fallback_template_code"/>
+        <result property="defaultOutputSchemaCode" column="default_output_schema_code"/>
+        <result property="dialogueEnabled" column="dialogue_enabled"/>
+        <result property="maxDialogueRounds" column="max_dialogue_rounds"/>
+        <result property="speakOrder" column="speak_order"/>
+        <result property="timeoutSeconds" column="timeout_seconds"/>
+        <result property="maxRetries" column="max_retries"/>
+        <result property="temperatureOverride" column="temperature_override"/>
+        <result property="topPOverride" column="top_p_override"/>
+        <result property="maxTokensOverride" column="max_tokens_override"/>
+        <result property="structuredSchemaCode" column="structured_schema_code"/>
+        <result property="toolPolicyJson" column="tool_policy_json"/>
+        <result property="runtimeOptionsJson" column="runtime_options_json"/>
+        <result property="remark" column="remark"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="tradeAgentProfileColumns">
+        id, agent_code, agent_name, agent_type, enabled, llm_enabled,
+        default_model_id, default_template_code, default_fallback_template_code, default_output_schema_code,
+        dialogue_enabled,
+        max_dialogue_rounds, speak_order, timeout_seconds, max_retries, temperature_override,
+        top_p_override, max_tokens_override, structured_schema_code, tool_policy_json,
+        runtime_options_json, remark, created_at, updated_at
+    </sql>
+
+    <select id="selectTradeAgentProfileList" parameterType="com.ruoyi.dca.domain.trade.TradeAgentProfile" resultMap="TradeAgentProfileResult">
+        select <include refid="tradeAgentProfileColumns"/>
+        from trade_agent_profile
+        <where>
+            <if test="agentCode != null and agentCode != ''">
+                and agent_code = #{agentCode}
+            </if>
+            <if test="agentName != null and agentName != ''">
+                and agent_name like concat('%', #{agentName}, '%')
+            </if>
+            <if test="agentType != null and agentType != ''">
+                and agent_type = #{agentType}
+            </if>
+            <if test="enabled != null">
+                and enabled = #{enabled}
+            </if>
+            <if test="llmEnabled != null">
+                and llm_enabled = #{llmEnabled}
+            </if>
+            <if test="dialogueEnabled != null">
+                and dialogue_enabled = #{dialogueEnabled}
+            </if>
+        </where>
+        order by speak_order asc, id asc
+    </select>
+
+    <select id="selectTradeAgentProfileById" resultMap="TradeAgentProfileResult">
+        select <include refid="tradeAgentProfileColumns"/>
+        from trade_agent_profile
+        where id = #{id}
+    </select>
+
+    <insert id="insertTradeAgentProfile" parameterType="com.ruoyi.dca.domain.trade.TradeAgentProfile" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_agent_profile (
+            agent_code,
+            agent_name,
+            agent_type,
+            enabled,
+            llm_enabled,
+            default_model_id,
+            default_template_code,
+            default_fallback_template_code,
+            default_output_schema_code,
+            dialogue_enabled,
+            max_dialogue_rounds,
+            speak_order,
+            timeout_seconds,
+            max_retries,
+            temperature_override,
+            top_p_override,
+            max_tokens_override,
+            structured_schema_code,
+            tool_policy_json,
+            runtime_options_json,
+            remark
+        ) values (
+            #{agentCode},
+            #{agentName},
+            #{agentType},
+            #{enabled},
+            #{llmEnabled},
+            #{defaultModelId},
+            #{defaultTemplateCode},
+            #{defaultFallbackTemplateCode},
+            #{defaultOutputSchemaCode},
+            #{dialogueEnabled},
+            #{maxDialogueRounds},
+            #{speakOrder},
+            #{timeoutSeconds},
+            #{maxRetries},
+            #{temperatureOverride},
+            #{topPOverride},
+            #{maxTokensOverride},
+            #{structuredSchemaCode},
+            #{toolPolicyJson},
+            #{runtimeOptionsJson},
+            #{remark}
+        )
+    </insert>
+
+    <update id="updateTradeAgentProfile" parameterType="com.ruoyi.dca.domain.trade.TradeAgentProfile">
+        update trade_agent_profile
+        <set>
+            <if test="agentCode != null">agent_code = #{agentCode},</if>
+            <if test="agentName != null">agent_name = #{agentName},</if>
+            <if test="agentType != null">agent_type = #{agentType},</if>
+            <if test="enabled != null">enabled = #{enabled},</if>
+            <if test="llmEnabled != null">llm_enabled = #{llmEnabled},</if>
+            <if test="defaultModelId != null">default_model_id = #{defaultModelId},</if>
+            <if test="defaultTemplateCode != null">default_template_code = #{defaultTemplateCode},</if>
+            <if test="defaultFallbackTemplateCode != null">default_fallback_template_code = #{defaultFallbackTemplateCode},</if>
+            <if test="defaultOutputSchemaCode != null">default_output_schema_code = #{defaultOutputSchemaCode},</if>
+            <if test="dialogueEnabled != null">dialogue_enabled = #{dialogueEnabled},</if>
+            <if test="maxDialogueRounds != null">max_dialogue_rounds = #{maxDialogueRounds},</if>
+            <if test="speakOrder != null">speak_order = #{speakOrder},</if>
+            <if test="timeoutSeconds != null">timeout_seconds = #{timeoutSeconds},</if>
+            <if test="maxRetries != null">max_retries = #{maxRetries},</if>
+            <if test="temperatureOverride != null">temperature_override = #{temperatureOverride},</if>
+            <if test="topPOverride != null">top_p_override = #{topPOverride},</if>
+            <if test="maxTokensOverride != null">max_tokens_override = #{maxTokensOverride},</if>
+            <if test="structuredSchemaCode != null">structured_schema_code = #{structuredSchemaCode},</if>
+            <if test="toolPolicyJson != null">tool_policy_json = #{toolPolicyJson},</if>
+            <if test="runtimeOptionsJson != null">runtime_options_json = #{runtimeOptionsJson},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            updated_at = now()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteTradeAgentProfileByIds">
+        delete from trade_agent_profile
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

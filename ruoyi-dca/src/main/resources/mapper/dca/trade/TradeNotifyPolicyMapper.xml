@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.TradeNotifyPolicyMapper">
+
+    <resultMap id="TradeNotifyPolicyResult" type="com.ruoyi.dca.domain.trade.TradeNotifyPolicy">
+        <id property="id" column="id"/>
+        <result property="policyName" column="policy_name"/>
+        <result property="policyScope" column="policy_scope"/>
+        <result property="strategyId" column="strategy_id"/>
+        <result property="eventScopeJson" column="event_scope_json"/>
+        <result property="severityScopeJson" column="severity_scope_json"/>
+        <result property="modeScopeJson" column="mode_scope_json"/>
+        <result property="throttleSeconds" column="throttle_seconds"/>
+        <result property="notifyTemplateCode" column="template_code"/>
+        <result property="enabled" column="enabled"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <resultMap id="TradeNotifyPolicyChannelResult" type="com.ruoyi.dca.domain.trade.TradeNotifyPolicyChannel">
+        <id property="id" column="id"/>
+        <result property="policyId" column="policy_id"/>
+        <result property="channelId" column="channel_id"/>
+        <result property="channelOrder" column="channel_order"/>
+        <result property="enabled" column="enabled"/>
+    </resultMap>
+
+    <sql id="tradeNotifyPolicyColumns">
+        id, policy_name, policy_scope, strategy_id, event_scope_json, severity_scope_json, mode_scope_json,
+        throttle_seconds, template_code, enabled, created_at, updated_at
+    </sql>
+
+    <select id="selectTradeNotifyPolicyList" parameterType="com.ruoyi.dca.domain.trade.TradeNotifyPolicy" resultMap="TradeNotifyPolicyResult">
+        select <include refid="tradeNotifyPolicyColumns"/>
+        from trade_notify_policy
+        <where>
+            <if test="policyName != null and policyName != ''">
+                and policy_name like concat('%', #{policyName}, '%')
+            </if>
+            <if test="policyScope != null and policyScope != ''">
+                and policy_scope = #{policyScope}
+            </if>
+            <if test="strategyId != null">
+                and strategy_id = #{strategyId}
+            </if>
+            <if test="enabled != null">
+                and enabled = #{enabled}
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+    <select id="selectTradeNotifyPolicyById" resultMap="TradeNotifyPolicyResult">
+        select <include refid="tradeNotifyPolicyColumns"/>
+        from trade_notify_policy
+        where id = #{id}
+    </select>
+
+    <insert id="insertTradeNotifyPolicy" parameterType="com.ruoyi.dca.domain.trade.TradeNotifyPolicy" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_notify_policy (
+            policy_name,
+            policy_scope,
+            strategy_id,
+            event_scope_json,
+            severity_scope_json,
+            mode_scope_json,
+            throttle_seconds,
+            template_code,
+            enabled
+        ) values (
+            #{policyName},
+            #{policyScope},
+            #{strategyId},
+            #{eventScopeJson},
+            #{severityScopeJson},
+            #{modeScopeJson},
+            #{throttleSeconds},
+            #{notifyTemplateCode},
+            #{enabled}
+        )
+    </insert>
+
+    <update id="updateTradeNotifyPolicy" parameterType="com.ruoyi.dca.domain.trade.TradeNotifyPolicy">
+        update trade_notify_policy
+        <set>
+            <if test="policyName != null">policy_name = #{policyName},</if>
+            <if test="policyScope != null">policy_scope = #{policyScope},</if>
+            strategy_id = #{strategyId},
+            <if test="eventScopeJson != null">event_scope_json = #{eventScopeJson},</if>
+            <if test="severityScopeJson != null">severity_scope_json = #{severityScopeJson},</if>
+            <if test="modeScopeJson != null">mode_scope_json = #{modeScopeJson},</if>
+            <if test="throttleSeconds != null">throttle_seconds = #{throttleSeconds},</if>
+            template_code = #{notifyTemplateCode},
+            <if test="enabled != null">enabled = #{enabled},</if>
+            updated_at = now()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteTradeNotifyPolicyByIds">
+        delete from trade_notify_policy
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <select id="selectTradeNotifyPolicyChannels" resultMap="TradeNotifyPolicyChannelResult">
+        select id, policy_id, channel_id, channel_order, enabled
+        from trade_notify_policy_channel
+        where policy_id = #{policyId}
+        order by channel_order asc, id asc
+    </select>
+
+    <delete id="deleteTradeNotifyPolicyChannelsByPolicyId">
+        delete from trade_notify_policy_channel
+        where policy_id = #{policyId}
+    </delete>
+
+    <delete id="deleteTradeNotifyPolicyChannelsByPolicyIds">
+        delete from trade_notify_policy_channel
+        where policy_id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <insert id="insertTradeNotifyPolicyChannels">
+        insert into trade_notify_policy_channel (
+            policy_id,
+            channel_id,
+            channel_order,
+            enabled
+        ) values
+        <foreach collection="channels" item="channel" separator=",">
+            (
+                #{channel.policyId},
+                #{channel.channelId},
+                #{channel.channelOrder},
+                #{channel.enabled}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

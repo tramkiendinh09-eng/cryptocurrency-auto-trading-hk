@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.PromptTemplateMapper">
+
+    <resultMap type="PromptTemplate" id="PromptTemplateResult">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="code" column="code"/>
+        <result property="content" column="content"/>
+        <result property="variables" column="variables"/>
+        <result property="version" column="version"/>
+        <result property="isActive" column="is_active"/>
+        <result property="isDefault" column="is_default"/>
+        <result property="remark" column="remark"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="selectPromptTemplateVo">
+        select id, name, code, content, variables, version, is_active, is_default, remark, create_by, create_time, update_by, update_time
+        from prompt_template
+    </sql>
+
+    <select id="selectPromptTemplateList" parameterType="PromptTemplate" resultMap="PromptTemplateResult">
+        <include refid="selectPromptTemplateVo"/>
+        <where>
+            <if test="name != null and name != ''">
+                AND name like concat('%', #{name}, '%')
+            </if>
+            <if test="code != null and code != ''">
+                AND code = #{code}
+            </if>
+            <if test="isActive != null">
+                AND is_active = #{isActive}
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+    <select id="selectPromptTemplateById" parameterType="Long" resultMap="PromptTemplateResult">
+        <include refid="selectPromptTemplateVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectPromptTemplateByCode" parameterType="String" resultMap="PromptTemplateResult">
+        <include refid="selectPromptTemplateVo"/>
+        where code = #{code}
+        order by version desc
+        limit 1
+    </select>
+
+    <select id="selectActiveTemplatesByCode" parameterType="String" resultMap="PromptTemplateResult">
+        <include refid="selectPromptTemplateVo"/>
+        where code = #{code} and is_active = 1
+        order by version desc
+    </select>
+
+    <insert id="insertPromptTemplate" parameterType="PromptTemplate" useGeneratedKeys="true" keyProperty="id">
+        insert into prompt_template
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="name != null and name != ''">name,</if>
+            <if test="code != null and code != ''">code,</if>
+            <if test="content != null and content != ''">content,</if>
+            <if test="variables != null">variables,</if>
+            <if test="version != null">version,</if>
+            <if test="isActive != null">is_active,</if>
+            <if test="isDefault != null">is_default,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="name != null and name != ''">#{name},</if>
+            <if test="code != null and code != ''">#{code},</if>
+            <if test="content != null and content != ''">#{content},</if>
+            <if test="variables != null">#{variables},</if>
+            <if test="version != null">#{version},</if>
+            <if test="isActive != null">#{isActive},</if>
+            <if test="isDefault != null">#{isDefault},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+        </trim>
+    </insert>
+
+    <update id="updatePromptTemplate" parameterType="PromptTemplate">
+        update prompt_template
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="name != null and name != ''">name = #{name},</if>
+            <if test="code != null and code != ''">code = #{code},</if>
+            <if test="content != null and content != ''">content = #{content},</if>
+            <if test="variables != null">variables = #{variables},</if>
+            <if test="version != null">version = #{version},</if>
+            <if test="isActive != null">is_active = #{isActive},</if>
+            <if test="isDefault != null">is_default = #{isDefault},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deletePromptTemplateById" parameterType="Long">
+        delete from prompt_template where id = #{id}
+    </delete>
+
+    <delete id="deletePromptTemplateByIds" parameterType="String">
+        delete from prompt_template where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <update id="incrementVersion" parameterType="Long">
+        update prompt_template set version = version + 1 where id = #{id}
+    </update>
+
+</mapper>

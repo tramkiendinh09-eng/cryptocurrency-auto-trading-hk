@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.ExchangeAccountMapper">
+
+    <resultMap id="ExchangeAccountResult" type="com.ruoyi.dca.domain.trade.ExchangeAccount">
+        <id property="id" column="id"/>
+        <result property="exchangeCode" column="exchange_code"/>
+        <result property="accountName" column="account_name"/>
+        <result property="accountKey" column="account_key"/>
+        <result property="accountRole" column="account_role"/>
+        <result property="apiKeyCiphertext" column="api_key_ciphertext"/>
+        <result property="apiSecretCiphertext" column="api_secret_ciphertext"/>
+        <result property="passphraseCiphertext" column="passphrase_ciphertext"/>
+        <result property="apiBaseUrl" column="api_base_url"/>
+        <result property="testnet" column="testnet"/>
+        <result property="demoTrading" column="demo_trading"/>
+        <result property="marginMode" column="margin_mode"/>
+        <result property="leverageMode" column="leverage_mode"/>
+        <result property="positionMode" column="position_mode"/>
+        <result property="settleCurrency" column="settle_currency"/>
+        <result property="enabled" column="enabled"/>
+        <result property="healthStatus" column="health_status"/>
+        <result property="lastValidatedAt" column="last_validated_at"/>
+        <result property="lastErrorMessage" column="last_error_message"/>
+    </resultMap>
+
+    <sql id="exchangeAccountColumns">
+        id, exchange_code, account_name, account_key, account_role, api_key_ciphertext, api_secret_ciphertext,
+        passphrase_ciphertext, api_base_url, testnet, demo_trading, margin_mode, leverage_mode, position_mode,
+        settle_currency, enabled, health_status, last_validated_at, last_error_message
+    </sql>
+
+    <select id="selectExchangeAccountList" parameterType="com.ruoyi.dca.domain.trade.ExchangeAccount" resultMap="ExchangeAccountResult">
+        select <include refid="exchangeAccountColumns"/>
+        from exchange_account
+        <where>
+            <if test="exchangeCode != null and exchangeCode != ''">
+                and exchange_code = #{exchangeCode}
+            </if>
+            <if test="accountName != null and accountName != ''">
+                and account_name like concat('%', #{accountName}, '%')
+            </if>
+            <if test="enabled != null">
+                and enabled = #{enabled}
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+    <select id="selectExchangeAccountById" resultMap="ExchangeAccountResult">
+        select <include refid="exchangeAccountColumns"/>
+        from exchange_account
+        where id = #{id}
+    </select>
+
+    <insert id="insertExchangeAccount" parameterType="com.ruoyi.dca.domain.trade.ExchangeAccount" useGeneratedKeys="true" keyProperty="id">
+        insert into exchange_account (
+            exchange_code,
+            account_name,
+            account_key,
+            account_role,
+            api_key_ciphertext,
+            api_secret_ciphertext,
+            passphrase_ciphertext,
+            api_base_url,
+            testnet,
+            demo_trading,
+            margin_mode,
+            leverage_mode,
+            position_mode,
+            settle_currency,
+            enabled,
+            health_status,
+            last_validated_at,
+            last_error_message
+        ) values (
+            #{exchangeCode},
+            #{accountName},
+            #{accountKey},
+            #{accountRole},
+            #{apiKeyCiphertext},
+            #{apiSecretCiphertext},
+            #{passphraseCiphertext},
+            #{apiBaseUrl},
+            #{testnet},
+            #{demoTrading},
+            #{marginMode},
+            #{leverageMode},
+            #{positionMode},
+            #{settleCurrency},
+            #{enabled},
+            #{healthStatus},
+            #{lastValidatedAt},
+            #{lastErrorMessage}
+        )
+    </insert>
+
+    <update id="updateExchangeAccount" parameterType="com.ruoyi.dca.domain.trade.ExchangeAccount">
+        update exchange_account
+        <set>
+            <if test="exchangeCode != null and exchangeCode != ''">exchange_code = #{exchangeCode},</if>
+            <if test="accountName != null and accountName != ''">account_name = #{accountName},</if>
+            <if test="accountKey != null">account_key = #{accountKey},</if>
+            <if test="accountRole != null and accountRole != ''">account_role = #{accountRole},</if>
+            <if test="apiKeyCiphertext != null">api_key_ciphertext = #{apiKeyCiphertext},</if>
+            <if test="apiSecretCiphertext != null">api_secret_ciphertext = #{apiSecretCiphertext},</if>
+            <if test="passphraseCiphertext != null">passphrase_ciphertext = #{passphraseCiphertext},</if>
+            <if test="apiBaseUrl != null">api_base_url = #{apiBaseUrl},</if>
+            <if test="testnet != null">testnet = #{testnet},</if>
+            <if test="demoTrading != null">demo_trading = #{demoTrading},</if>
+            <if test="marginMode != null and marginMode != ''">margin_mode = #{marginMode},</if>
+            <if test="leverageMode != null and leverageMode != ''">leverage_mode = #{leverageMode},</if>
+            <if test="positionMode != null and positionMode != ''">position_mode = #{positionMode},</if>
+            <if test="settleCurrency != null and settleCurrency != ''">settle_currency = #{settleCurrency},</if>
+            <if test="enabled != null">enabled = #{enabled},</if>
+            <if test="healthStatus != null and healthStatus != ''">health_status = #{healthStatus},</if>
+            <if test="lastValidatedAt != null">last_validated_at = #{lastValidatedAt},</if>
+            <if test="lastErrorMessage != null">last_error_message = #{lastErrorMessage},</if>
+            updated_at = now()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteExchangeAccountByIds">
+        delete from exchange_account
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

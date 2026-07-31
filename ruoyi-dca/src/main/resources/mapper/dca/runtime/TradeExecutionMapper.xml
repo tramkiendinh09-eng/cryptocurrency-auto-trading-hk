@@ -1,0 +1,632 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.runtime.TradeExecutionMapper">
+
+    <sql id="exchangeExecutionStatusExpr">
+        case
+            when status is not null and status != '' then lower(status)
+            when order_status = 'FILLED' then 'filled'
+            when order_status = 'PARTIALLY_FILLED' then 'partial'
+            when order_status = 'CANCELED' then 'canceled'
+            when order_status = 'EXPIRED' then 'expired'
+            when order_status = 'REJECTED' then 'failed'
+            when order_status = 'BLOCKED' then 'blocked'
+            when order_status = 'SKIPPED' then 'skipped'
+            when order_status = 'SUBMITTED' then 'submitted'
+            else 'pending'
+        end
+    </sql>
+
+    <insert id="insertOrderRequest" parameterType="com.ruoyi.dca.domain.order.OrderRequest" useGeneratedKeys="true" keyProperty="id">
+        insert into order_request (
+            trace_id,
+            exchange_code,
+            symbol,
+            side,
+            mode,
+            quote_amount,
+            action,
+            order_type,
+            position_side,
+            reduce_only,
+            td_mode,
+            leverage,
+            limit_price,
+            quantity_base,
+            okx_enhanced_execution
+        ) values (
+            #{traceId},
+            #{exchangeCode},
+            #{symbol},
+            #{side},
+            #{mode},
+            #{quoteAmount},
+            #{action},
+            #{orderType},
+            #{positionSide},
+            #{reduceOnly},
+            #{tdMode},
+            #{leverage},
+            #{limitPrice},
+            #{quantityBase},
+            #{okxEnhancedExecution}
+        )
+    </insert>
+
+    <insert id="insertExchangeOrder" parameterType="com.ruoyi.dca.domain.order.ExchangeOrder" useGeneratedKeys="true" keyProperty="id">
+        insert into exchange_order (
+            trace_id,
+            exchange_code,
+            symbol,
+            side,
+            mode,
+            order_ref,
+            client_order_id,
+            action,
+            order_type,
+            position_side,
+            reduce_only,
+            td_mode,
+            leverage,
+            limit_price,
+            quantity_base,
+            okx_enhanced_execution,
+            filled_quantity,
+            avg_fill_price,
+            fee,
+            fee_ccy,
+            post_only,
+            status,
+            order_status,
+            created_at,
+            updated_at,
+            filled_at,
+            raw_payload
+        ) values (
+            #{traceId},
+            #{exchangeCode},
+            #{symbol},
+            #{side},
+            #{mode},
+            #{orderRef},
+            #{clientOrderId},
+            #{action},
+            #{orderType},
+            #{positionSide},
+            #{reduceOnly},
+            #{tdMode},
+            #{leverage},
+            #{limitPrice},
+            #{quantityBase},
+            #{okxEnhancedExecution},
+            #{filledQuantity},
+            #{avgFillPrice},
+            #{fee},
+            #{feeCcy},
+            #{postOnly},
+            #{status},
+            #{orderStatus},
+            coalesce(#{createdAt}, current_timestamp),
+            coalesce(#{updatedAt}, current_timestamp),
+            #{filledAt},
+            #{rawPayload}
+        )
+    </insert>
+
+    <update id="updateExchangeOrderByRef" parameterType="com.ruoyi.dca.domain.order.ExchangeOrder">
+        update exchange_order
+        set
+            trace_id = coalesce(#{traceId}, trace_id),
+            symbol = coalesce(#{symbol}, symbol),
+            side = coalesce(#{side}, side),
+            mode = coalesce(#{mode}, mode),
+            client_order_id = coalesce(#{clientOrderId}, client_order_id),
+            action = coalesce(#{action}, action),
+            order_type = coalesce(#{orderType}, order_type),
+            position_side = coalesce(#{positionSide}, position_side),
+            reduce_only = coalesce(#{reduceOnly}, reduce_only),
+            td_mode = coalesce(#{tdMode}, td_mode),
+            leverage = coalesce(#{leverage}, leverage),
+            limit_price = coalesce(#{limitPrice}, limit_price),
+            quantity_base = coalesce(#{quantityBase}, quantity_base),
+            okx_enhanced_execution = coalesce(#{okxEnhancedExecution}, okx_enhanced_execution),
+            filled_quantity = coalesce(#{filledQuantity}, filled_quantity),
+            avg_fill_price = coalesce(#{avgFillPrice}, avg_fill_price),
+            fee = coalesce(#{fee}, fee),
+            fee_ccy = coalesce(#{feeCcy}, fee_ccy),
+            post_only = coalesce(#{postOnly}, post_only),
+            status = coalesce(#{status}, status),
+            order_status = coalesce(#{orderStatus}, order_status),
+            updated_at = coalesce(#{updatedAt}, current_timestamp),
+            filled_at = coalesce(#{filledAt}, filled_at),
+            raw_payload = coalesce(#{rawPayload}, raw_payload)
+        where exchange_code = #{exchangeCode}
+          and order_ref = #{orderRef}
+          and order_ref is not null
+          and order_ref != ''
+    </update>
+
+    <insert id="insertExchangeFill" parameterType="com.ruoyi.dca.domain.order.ExchangeFill" useGeneratedKeys="true" keyProperty="id">
+        insert into exchange_fill (
+            trace_id,
+            exchange_code,
+            symbol,
+            side,
+            position_side,
+            order_ref,
+            trade_id,
+            fill_price,
+            fill_quantity,
+            fee,
+            fee_ccy,
+            is_maker,
+            exec_type,
+            realized_pnl,
+            filled_at,
+            raw_payload,
+            created_at
+        ) values (
+            #{traceId},
+            #{exchangeCode},
+            #{symbol},
+            #{side},
+            #{positionSide},
+            #{orderRef},
+            #{tradeId},
+            #{fillPrice},
+            #{fillQuantity},
+            #{fee},
+            #{feeCcy},
+            #{isMaker},
+            #{execType},
+            #{realizedPnl},
+            #{filledAt},
+            #{rawPayload},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <update id="updateExchangeFillByTradeId" parameterType="com.ruoyi.dca.domain.order.ExchangeFill">
+        update exchange_fill
+        set
+            trace_id = coalesce(#{traceId}, trace_id),
+            symbol = coalesce(#{symbol}, symbol),
+            side = coalesce(#{side}, side),
+            position_side = coalesce(#{positionSide}, position_side),
+            order_ref = coalesce(#{orderRef}, order_ref),
+            fill_price = coalesce(#{fillPrice}, fill_price),
+            fill_quantity = coalesce(#{fillQuantity}, fill_quantity),
+            fee = coalesce(#{fee}, fee),
+            fee_ccy = coalesce(#{feeCcy}, fee_ccy),
+            is_maker = coalesce(#{isMaker}, is_maker),
+            exec_type = coalesce(#{execType}, exec_type),
+            realized_pnl = coalesce(#{realizedPnl}, realized_pnl),
+            filled_at = coalesce(#{filledAt}, filled_at),
+            raw_payload = coalesce(#{rawPayload}, raw_payload)
+        where exchange_code = #{exchangeCode}
+          and trade_id = #{tradeId}
+          and trade_id is not null
+          and trade_id != ''
+    </update>
+
+    <insert id="insertRiskGuardHit" parameterType="com.ruoyi.dca.domain.risk.RiskGuardHit" useGeneratedKeys="true" keyProperty="id">
+        insert into risk_guard_hit (
+            trace_id,
+            rule_code,
+            reason,
+            created_at
+        ) values (
+            #{traceId},
+            #{ruleCode},
+            #{reason},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <insert id="insertPositionSnapshot" parameterType="com.ruoyi.dca.domain.position.PositionSnapshot" useGeneratedKeys="true" keyProperty="id">
+        insert into position_snapshot (
+            trace_id,
+            entry_trace_id,
+            exchange_code,
+            symbol,
+            side,
+            position_quantity,
+            entry_price,
+            unrealized_pnl,
+            created_at
+        ) values (
+            #{traceId},
+            #{entryTraceId},
+            #{exchangeCode},
+            #{symbol},
+            #{side},
+            #{positionQuantity},
+            #{entryPrice},
+            #{unrealizedPnl},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <update id="updatePositionSnapshot" parameterType="com.ruoyi.dca.domain.position.PositionSnapshot">
+        update position_snapshot
+        set
+            trace_id = #{traceId},
+            entry_trace_id = #{entryTraceId},
+            exchange_code = #{exchangeCode},
+            symbol = #{symbol},
+            side = #{side},
+            position_quantity = #{positionQuantity},
+            entry_price = #{entryPrice},
+            unrealized_pnl = #{unrealizedPnl},
+            created_at = coalesce(#{createdAt}, created_at)
+        where id = #{id}
+    </update>
+
+    <select id="selectLatestPositionSnapshotByScope" resultType="com.ruoyi.dca.domain.position.PositionSnapshot">
+        select
+            id,
+            trace_id as traceId,
+            entry_trace_id as entryTraceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            position_quantity as positionQuantity,
+            entry_price as entryPrice,
+            unrealized_pnl as unrealizedPnl,
+            created_at as createdAt
+        from position_snapshot
+        where exchange_code = #{exchangeCode}
+          and symbol = #{symbol}
+          and case lower(side)
+                when 'buy' then 'long'
+                when 'sell' then 'short'
+                else lower(side)
+              end = lower(#{side})
+        order by created_at desc, id desc
+        limit 1
+    </select>
+
+    <select id="selectLatestPositionSnapshotIdByScope" resultType="long">
+        select id
+        from position_snapshot
+        where exchange_code = #{exchangeCode}
+          and symbol = #{symbol}
+          and case lower(side)
+                when 'buy' then 'long'
+                when 'sell' then 'short'
+                else lower(side)
+              end = lower(#{side})
+        order by created_at desc, id desc
+        limit 1
+    </select>
+
+    <insert id="insertPnlSnapshot" parameterType="com.ruoyi.dca.domain.pnl.PnlSnapshot" useGeneratedKeys="true" keyProperty="id">
+        insert into pnl_snapshot (
+            trace_id,
+            mode,
+            account_equity,
+            unrealized_pnl,
+            realized_pnl,
+            daily_pnl,
+            max_drawdown_pct,
+            peak_account_equity,
+            created_at
+        ) values (
+            #{traceId},
+            #{mode},
+            #{accountEquity},
+            #{unrealizedPnl},
+            #{realizedPnl},
+            #{dailyPnl},
+            #{maxDrawdownPct},
+            #{peakAccountEquity},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <select id="selectLatestPnlSnapshotByMode" resultType="com.ruoyi.dca.domain.pnl.PnlSnapshot">
+        select
+            id,
+            trace_id as traceId,
+            mode,
+            account_equity as accountEquity,
+            unrealized_pnl as unrealizedPnl,
+            realized_pnl as realizedPnl,
+            daily_pnl as dailyPnl,
+            max_drawdown_pct as maxDrawdownPct,
+            peak_account_equity as peakAccountEquity,
+            created_at as createdAt
+        from pnl_snapshot
+        where mode = #{mode}
+        order by created_at desc, id desc
+        limit 1
+    </select>
+
+    <select id="selectLatestPnlSnapshot" resultType="com.ruoyi.dca.domain.pnl.PnlSnapshot">
+        select
+            id,
+            trace_id as traceId,
+            mode,
+            account_equity as accountEquity,
+            unrealized_pnl as unrealizedPnl,
+            realized_pnl as realizedPnl,
+            daily_pnl as dailyPnl,
+            max_drawdown_pct as maxDrawdownPct,
+            peak_account_equity as peakAccountEquity,
+            created_at as createdAt
+        from pnl_snapshot
+        order by created_at desc, id desc
+        limit 1
+    </select>
+
+    <insert id="insertPositionChangeLog" parameterType="com.ruoyi.dca.domain.position.PositionChangeLog" useGeneratedKeys="true" keyProperty="id">
+        insert into position_change_log (
+            trace_id,
+            exchange_code,
+            symbol,
+            side,
+            change_type,
+            before_quantity,
+            after_quantity,
+            delta_quantity,
+            entry_price,
+            unrealized_pnl,
+            created_at
+        ) values (
+            #{traceId},
+            #{exchangeCode},
+            #{symbol},
+            #{side},
+            #{changeType},
+            #{beforeQuantity},
+            #{afterQuantity},
+            #{deltaQuantity},
+            #{entryPrice},
+            #{unrealizedPnl},
+            coalesce(#{createdAt}, current_timestamp)
+        )
+    </insert>
+
+    <select id="selectExchangeOrders" resultType="com.ruoyi.dca.domain.order.ExchangeOrder">
+        select
+            id,
+            trace_id as traceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            mode,
+            order_ref as orderRef,
+            client_order_id as clientOrderId,
+            action,
+            order_type as orderType,
+            position_side as positionSide,
+            reduce_only as reduceOnly,
+            td_mode as tdMode,
+            leverage,
+            limit_price as limitPrice,
+            quantity_base as quantityBase,
+            okx_enhanced_execution as okxEnhancedExecution,
+            filled_quantity as filledQuantity,
+            avg_fill_price as avgFillPrice,
+            fee,
+            fee_ccy as feeCcy,
+            post_only as postOnly,
+            <include refid="exchangeExecutionStatusExpr"/> as status,
+            <include refid="exchangeExecutionStatusExpr"/> as executionStatus,
+            order_status as orderStatus,
+            created_at as createdAt,
+            updated_at as updatedAt,
+            filled_at as filledAt,
+            raw_payload as rawPayload
+        from exchange_order
+        <where>
+            <if test="status != null and status != ''">
+                <include refid="exchangeExecutionStatusExpr"/> = #{status}
+            </if>
+            <if test="orderStatus != null and orderStatus != ''">
+                <if test="status != null and status != ''">
+                    and
+                </if>
+                order_status = #{orderStatus}
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+    <select id="selectPendingLiveOrders" resultType="com.ruoyi.dca.domain.order.ExchangeOrder">
+        select
+            id,
+            trace_id as traceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            mode,
+            order_ref as orderRef,
+            client_order_id as clientOrderId,
+            action,
+            order_type as orderType,
+            position_side as positionSide,
+            reduce_only as reduceOnly,
+            td_mode as tdMode,
+            leverage,
+            limit_price as limitPrice,
+            quantity_base as quantityBase,
+            okx_enhanced_execution as okxEnhancedExecution,
+            filled_quantity as filledQuantity,
+            avg_fill_price as avgFillPrice,
+            fee,
+            fee_ccy as feeCcy,
+            post_only as postOnly,
+            <include refid="exchangeExecutionStatusExpr"/> as status,
+            <include refid="exchangeExecutionStatusExpr"/> as executionStatus,
+            order_status as orderStatus,
+            created_at as createdAt,
+            updated_at as updatedAt,
+            filled_at as filledAt,
+            raw_payload as rawPayload
+        from exchange_order
+        where <include refid="exchangeExecutionStatusExpr"/> in ('pending', 'submitted', 'partial')
+        <if test="exchangeCode != null and exchangeCode != ''">
+          and exchange_code = #{exchangeCode}
+        </if>
+        <if test="symbol != null and symbol != ''">
+          and symbol = #{symbol}
+        </if>
+        <if test="mode != null and mode != ''">
+          and mode = #{mode}
+        </if>
+        order by updated_at desc, created_at desc, id desc
+    </select>
+
+    <select id="selectRecentExchangeOrdersByScope" resultType="com.ruoyi.dca.domain.order.ExchangeOrder">
+        select
+            id,
+            trace_id as traceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            mode,
+            order_ref as orderRef,
+            client_order_id as clientOrderId,
+            action,
+            order_type as orderType,
+            position_side as positionSide,
+            reduce_only as reduceOnly,
+            td_mode as tdMode,
+            leverage,
+            limit_price as limitPrice,
+            quantity_base as quantityBase,
+            okx_enhanced_execution as okxEnhancedExecution,
+            filled_quantity as filledQuantity,
+            avg_fill_price as avgFillPrice,
+            fee,
+            fee_ccy as feeCcy,
+            post_only as postOnly,
+            <include refid="exchangeExecutionStatusExpr"/> as status,
+            <include refid="exchangeExecutionStatusExpr"/> as executionStatus,
+            order_status as orderStatus,
+            created_at as createdAt,
+            updated_at as updatedAt,
+            filled_at as filledAt,
+            raw_payload as rawPayload
+        from exchange_order
+        where exchange_code = #{exchangeCode}
+          and symbol = #{symbol}
+        order by created_at desc, id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectExchangeFills" resultType="com.ruoyi.dca.domain.order.ExchangeFill">
+        select
+            id,
+            trace_id as traceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            position_side as positionSide,
+            order_ref as orderRef,
+            trade_id as tradeId,
+            fill_price as fillPrice,
+            fill_quantity as fillQuantity,
+            fee,
+            fee_ccy as feeCcy,
+            is_maker as isMaker,
+            exec_type as execType,
+            realized_pnl as realizedPnl,
+            filled_at as filledAt,
+            raw_payload as rawPayload,
+            created_at as createdAt
+        from exchange_fill
+        order by id desc
+    </select>
+
+    <select id="selectRiskGuardHits" resultType="com.ruoyi.dca.domain.risk.RiskGuardHit">
+        select
+            id,
+            trace_id as traceId,
+            rule_code as ruleCode,
+            reason,
+            created_at as createdAt
+        from risk_guard_hit
+        order by id desc
+    </select>
+
+    <select id="selectExecutionStatusCounts" resultType="java.util.HashMap">
+        select
+            <include refid="exchangeExecutionStatusExpr"/> as executionStatus,
+            count(*) as total
+        from exchange_order
+        group by <include refid="exchangeExecutionStatusExpr"/>
+    </select>
+
+    <select id="selectPositionSnapshots" resultType="com.ruoyi.dca.domain.position.PositionSnapshot">
+        select
+            ps.id,
+            ps.trace_id as traceId,
+            ps.entry_trace_id as entryTraceId,
+            ps.exchange_code as exchangeCode,
+            ps.symbol,
+            case lower(ps.side)
+                when 'buy' then 'long'
+                when 'sell' then 'short'
+                else lower(ps.side)
+            end as side,
+            ps.position_quantity as positionQuantity,
+            ps.entry_price as entryPrice,
+            ps.unrealized_pnl as unrealizedPnl
+        from position_snapshot ps
+        inner join (
+            select max(id) as latestId
+            from position_snapshot
+            group by exchange_code,
+                     symbol,
+                     case lower(side)
+                         when 'buy' then 'long'
+                         when 'sell' then 'short'
+                         else lower(side)
+                     end
+        ) latest on latest.latestId = ps.id
+        order by ps.created_at desc, ps.id desc
+    </select>
+
+    <select id="selectLatestActivePositionSnapshotByScope" resultType="com.ruoyi.dca.domain.position.PositionSnapshot">
+        select
+            id,
+            trace_id as traceId,
+            entry_trace_id as entryTraceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            position_quantity as positionQuantity,
+            entry_price as entryPrice,
+            unrealized_pnl as unrealizedPnl,
+            created_at as createdAt
+        from position_snapshot
+        where exchange_code = #{exchangeCode}
+          and symbol = #{symbol}
+          and side in ('long', 'short', 'flat')
+        order by created_at desc, id desc
+        limit 1
+    </select>
+
+    <select id="selectPositionChangeLogs" resultType="com.ruoyi.dca.domain.position.PositionChangeLog">
+        select
+            id,
+            trace_id as traceId,
+            exchange_code as exchangeCode,
+            symbol,
+            side,
+            change_type as changeType,
+            before_quantity as beforeQuantity,
+            after_quantity as afterQuantity,
+            delta_quantity as deltaQuantity,
+            entry_price as entryPrice,
+            unrealized_pnl as unrealizedPnl,
+            created_at as createdAt
+        from position_change_log
+        order by id desc
+    </select>
+
+</mapper>

@@ -1,0 +1,79 @@
+﻿<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.memory.AgentMemoryMapper">
+
+    <resultMap id="AgentMemoryResult" type="com.ruoyi.dca.domain.memory.AgentMemory">
+        <id property="id" column="id"/>
+        <result property="memoryKey" column="memory_key"/>
+        <result property="agentCode" column="agent_code"/>
+        <result property="symbol" column="symbol"/>
+        <result property="memoryType" column="memory_type"/>
+        <result property="marketRegime" column="market_regime"/>
+        <result property="eventTagsJson" column="event_tags_json"/>
+        <result property="direction" column="direction"/>
+        <result property="action" column="action"/>
+        <result property="lessonText" column="lesson_text"/>
+        <result property="evidenceJson" column="evidence_json"/>
+        <result property="outcomeJson" column="outcome_json"/>
+        <result property="qualityScore" column="quality_score"/>
+        <result property="confidence" column="confidence"/>
+        <result property="usageCount" column="usage_count"/>
+        <result property="winCount" column="win_count"/>
+        <result property="lossCount" column="loss_count"/>
+        <result property="lastUsedAt" column="last_used_at"/>
+        <result property="sourceTraceId" column="source_trace_id"/>
+        <result property="enabled" column="enabled"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="selectCandidateMemories" resultMap="AgentMemoryResult">
+        select *
+        from agent_memory
+        where enabled = 1
+          and agent_code = #{agentCode}
+          and symbol = #{symbol}
+        order by
+        <if test="tags != null and tags.size() > 0">
+          (
+            <foreach collection="tags" item="tag" separator=" + ">
+              case when lower(event_tags_json) like lower(concat(concat('%&quot;', #{tag}), '&quot;%')) then 1 else 0 end
+            </foreach>
+          ) desc,
+        </if>
+        quality_score desc, updated_at desc, id desc
+        limit #{limit}
+    </select>
+
+    <insert id="insertAgentMemory" parameterType="com.ruoyi.dca.domain.memory.AgentMemory" useGeneratedKeys="true" keyProperty="id">
+        insert into agent_memory (
+            memory_key, agent_code, symbol, memory_type, market_regime, event_tags_json,
+            direction, action, lesson_text, evidence_json, outcome_json, quality_score,
+            confidence, source_trace_id, enabled
+        ) values (
+            #{memoryKey}, #{agentCode}, #{symbol}, #{memoryType}, #{marketRegime}, #{eventTagsJson},
+            #{direction}, #{action}, #{lessonText}, #{evidenceJson}, #{outcomeJson}, #{qualityScore},
+            #{confidence}, #{sourceTraceId}, #{enabled}
+        )
+    </insert>
+
+    <insert id="insertAgentMemoryUsage" parameterType="com.ruoyi.dca.domain.memory.AgentMemoryUsage" useGeneratedKeys="true" keyProperty="id">
+        insert into agent_memory_usage (trace_id, symbol, memory_id, agent_code, usage_context_json, outcome_json)
+        values (#{traceId}, #{symbol}, #{memoryId}, #{agentCode}, #{usageContextJson}, #{outcomeJson})
+    </insert>
+
+    <update id="markMemoryUsed">
+        update agent_memory
+        set usage_count = usage_count + 1,
+            last_used_at = now()
+        where id = #{id}
+    </update>
+
+    <update id="disableMemory">
+        update agent_memory
+        set enabled = 0
+        where id = #{id}
+    </update>
+</mapper>

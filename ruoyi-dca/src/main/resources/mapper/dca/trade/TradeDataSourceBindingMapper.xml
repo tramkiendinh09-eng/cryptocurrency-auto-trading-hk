@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.TradeDataSourceBindingMapper">
+
+    <resultMap id="TradeDataSourceBindingResult" type="com.ruoyi.dca.domain.trade.TradeDataSourceBinding">
+        <id property="id" column="id"/>
+        <result property="bindingName" column="binding_name"/>
+        <result property="strategyId" column="strategy_id"/>
+        <result property="sourceId" column="source_id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="symbolScopeJson" column="symbol_scope_json"/>
+        <result property="exchangeScopeJson" column="exchange_scope_json"/>
+        <result property="modeScopeJson" column="mode_scope_json"/>
+        <result property="enabled" column="enabled"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="tradeDataSourceBindingColumns">
+        id, binding_name, strategy_id, source_id, event_type, symbol_scope_json, exchange_scope_json,
+        mode_scope_json, enabled, created_at, updated_at
+    </sql>
+
+    <select id="selectTradeDataSourceBindingList" parameterType="com.ruoyi.dca.domain.trade.TradeDataSourceBinding" resultMap="TradeDataSourceBindingResult">
+        select <include refid="tradeDataSourceBindingColumns"/>
+        from trade_data_source_binding
+        <where>
+            <if test="bindingName != null and bindingName != ''">
+                and binding_name like concat('%', #{bindingName}, '%')
+            </if>
+            <if test="strategyId != null">
+                and strategy_id = #{strategyId}
+            </if>
+            <if test="sourceId != null">
+                and source_id = #{sourceId}
+            </if>
+            <if test="eventType != null and eventType != ''">
+                and event_type = #{eventType}
+            </if>
+            <if test="enabled != null">
+                and enabled = #{enabled}
+            </if>
+        </where>
+        order by id desc
+    </select>
+
+    <select id="selectTradeDataSourceBindingById" resultMap="TradeDataSourceBindingResult">
+        select <include refid="tradeDataSourceBindingColumns"/>
+        from trade_data_source_binding
+        where id = #{id}
+    </select>
+
+    <insert id="insertTradeDataSourceBinding" parameterType="com.ruoyi.dca.domain.trade.TradeDataSourceBinding" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_data_source_binding (
+            binding_name,
+            strategy_id,
+            source_id,
+            event_type,
+            symbol_scope_json,
+            exchange_scope_json,
+            mode_scope_json,
+            enabled
+        ) values (
+            #{bindingName},
+            #{strategyId},
+            #{sourceId},
+            #{eventType},
+            #{symbolScopeJson},
+            #{exchangeScopeJson},
+            #{modeScopeJson},
+            #{enabled}
+        )
+    </insert>
+
+    <update id="updateTradeDataSourceBinding" parameterType="com.ruoyi.dca.domain.trade.TradeDataSourceBinding">
+        update trade_data_source_binding
+        <set>
+            <if test="bindingName != null">binding_name = #{bindingName},</if>
+            strategy_id = #{strategyId},
+            <if test="sourceId != null">source_id = #{sourceId},</if>
+            <if test="eventType != null">event_type = #{eventType},</if>
+            <if test="symbolScopeJson != null">symbol_scope_json = #{symbolScopeJson},</if>
+            <if test="exchangeScopeJson != null">exchange_scope_json = #{exchangeScopeJson},</if>
+            <if test="modeScopeJson != null">mode_scope_json = #{modeScopeJson},</if>
+            <if test="enabled != null">enabled = #{enabled},</if>
+            updated_at = now()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteTradeDataSourceBindingByIds">
+        delete from trade_data_source_binding
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

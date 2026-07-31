@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.AuditOperationLogMapper">
+
+    <resultMap type="AuditOperationLog" id="AuditOperationLogResult">
+        <id     property="id"                 column="id"                 />
+        <result property="userId"             column="user_id"            />
+        <result property="username"           column="username"           />
+        <result property="module"             column="module"             />
+        <result property="operation"          column="operation"          />
+        <result property="description"        column="description"        />
+        <result property="requestMethod"      column="request_method"     />
+        <result property="requestUrl"         column="request_url"        />
+        <result property="requestIp"          column="request_ip"         />
+        <result property="requestParams"      column="request_params"     />
+        <result property="responseData"       column="response_data"      />
+        <result property="status"             column="status"             />
+        <result property="errorMsg"           column="error_msg"          />
+        <result property="executionTime"      column="execution_time"     />
+        <result property="operationTime"      column="operation_time"     />
+        <result property="remark"             column="remark"             />
+        <result property="createBy"           column="create_by"          />
+        <result property="createTime"         column="create_time"        />
+        <result property="updateBy"           column="update_by"          />
+        <result property="updateTime"         column="update_time"        />
+    </resultMap>
+
+    <sql id="selectAuditOperationLogVo">
+        select id, user_id, username, module, operation, description, request_method, request_url,
+               request_ip, request_params, response_data, status, error_msg, execution_time, operation_time,
+               remark, create_by, create_time, update_by, update_time
+        from audit_operation_log
+    </sql>
+
+    <select id="selectAuditOperationLogById" parameterType="Long" resultMap="AuditOperationLogResult">
+        <include refid="selectAuditOperationLogVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectAuditOperationLogList" parameterType="AuditOperationLog" resultMap="AuditOperationLogResult">
+        <include refid="selectAuditOperationLogVo"/>
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="username != null and username != ''">
+                AND username like concat('%', #{username}, '%')
+            </if>
+            <if test="module != null and module != ''">
+                AND module = #{module}
+            </if>
+            <if test="operation != null and operation != ''">
+                AND operation = #{operation}
+            </if>
+            <if test="status != null">
+                AND status = #{status}
+            </if>
+            <if test="requestIp != null and requestIp != ''">
+                AND request_ip like concat('%', #{requestIp}, '%')
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                AND date_format(operation_time,'%Y%m%d') &gt;= date_format(#{params.beginTime},'%Y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                AND date_format(operation_time,'%Y%m%d') &lt;= date_format(#{params.endTime},'%Y%m%d')
+            </if>
+        </where>
+        order by operation_time desc
+    </select>
+
+    <insert id="insertAuditOperationLog" parameterType="AuditOperationLog" useGeneratedKeys="true" keyProperty="id">
+        insert into audit_operation_log (
+            <if test="userId != null">user_id,</if>
+            <if test="username != null and username != ''">username,</if>
+            <if test="module != null and module != ''">module,</if>
+            <if test="operation != null and operation != ''">operation,</if>
+            <if test="description != null">description,</if>
+            <if test="requestMethod != null and requestMethod != ''">request_method,</if>
+            <if test="requestUrl != null and requestUrl != ''">request_url,</if>
+            <if test="requestIp != null and requestIp != ''">request_ip,</if>
+            <if test="requestParams != null">request_params,</if>
+            <if test="responseData != null">response_data,</if>
+            <if test="status != null">status,</if>
+            <if test="errorMsg != null">error_msg,</if>
+            <if test="executionTime != null">execution_time,</if>
+            <if test="operationTime != null">operation_time,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+        )values(
+            <if test="userId != null">#{userId},</if>
+            <if test="username != null and username != ''">#{username},</if>
+            <if test="module != null and module != ''">#{module},</if>
+            <if test="operation != null and operation != ''">#{operation},</if>
+            <if test="description != null">#{description},</if>
+            <if test="requestMethod != null and requestMethod != ''">#{requestMethod},</if>
+            <if test="requestUrl != null and requestUrl != ''">#{requestUrl},</if>
+            <if test="requestIp != null and requestIp != ''">#{requestIp},</if>
+            <if test="requestParams != null">#{requestParams},</if>
+            <if test="responseData != null">#{responseData},</if>
+            <if test="status != null">#{status},</if>
+            <if test="errorMsg != null">#{errorMsg},</if>
+            <if test="executionTime != null">#{executionTime},</if>
+            <if test="operationTime != null">#{operationTime},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+        )
+    </insert>
+
+    <update id="updateAuditOperationLog" parameterType="AuditOperationLog">
+        update audit_operation_log
+        <set>
+            <if test="responseData != null">response_data = #{responseData},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="errorMsg != null">error_msg = #{errorMsg},</if>
+            <if test="executionTime != null">execution_time = #{executionTime},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteAuditOperationLogById" parameterType="Long">
+        delete from audit_operation_log where id = #{id}
+    </delete>
+
+    <delete id="deleteAuditOperationLogByIds" parameterType="Long">
+        delete from audit_operation_log where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <select id="selectOperationStatistics" parameterType="map" resultMap="AuditOperationLogResult">
+        select
+            count(*) as total_count,
+            sum(case when status = 1 then 1 else 0 end) as success_count,
+            sum(case when status = 0 then 1 else 0 end) as fail_count,
+            sum(case when status = 1 then 1 else 0 end) / count(*) * 100 as success_rate,
+            sum(execution_time) / count(*) as avg_execution_time
+        from audit_operation_log
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="module != null and module != ''">
+                AND module = #{module}
+            </if>
+            <if test="beginTime != null and beginTime != ''">
+                AND date_format(operation_time,'%Y%m%d') &gt;= date_format(#{beginTime},'%Y%m%d')
+            </if>
+            <if test="endTime != null and endTime != ''">
+                AND date_format(operation_time,'%Y%m%d') &lt;= date_format(#{endTime},'%Y%m%d')
+            </if>
+        </where>
+    </select>
+
+    <select id="selectUserOperationStatistics" parameterType="Long" resultType="map">
+        select
+            module,
+            operation,
+            count(*) as count,
+            sum(case when status = 1 then 1 else 0 end) as success_count,
+            sum(case when status = 0 then 1 else 0 end) as fail_count
+        from audit_operation_log
+        where user_id = #{userId}
+        group by module, operation
+        order by count desc
+    </select>
+
+    <select id="selectModuleOperationStatistics" parameterType="String" resultType="map">
+        select
+            date_format(operation_time, '%Y-%m-%d') as operation_date,
+            count(*) as count,
+            sum(case when status = 1 then 1 else 0 end) as success_count,
+            sum(case when status = 0 then 1 else 0 end) as fail_count
+        from audit_operation_log
+        where module = #{module}
+            and operation_time &gt;= date_sub(now(), interval 30 day)
+        group by date_format(operation_time, '%Y-%m-%d')
+        order by operation_date desc
+    </select>
+
+    <delete id="cleanExpiredLogs">
+        delete from audit_operation_log
+        where operation_time &lt; date_sub(now(), interval #{days} day)
+    </delete>
+
+</mapper>

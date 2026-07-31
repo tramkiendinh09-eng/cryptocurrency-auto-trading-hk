@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.AiModelConfigMapper">
+
+    <resultMap type="AiModelConfig" id="AiModelConfigResult">
+        <result property="id"                    column="id"                    />
+        <result property="modelKey"              column="model_key"             />
+        <result property="modelCode"             column="model_code"            />
+        <result property="modelName"             column="model_name"            />
+        <result property="provider"              column="provider"              />
+        <result property="apiEndpoint"           column="api_endpoint"          />
+        <result property="apiKeyEncrypted"       column="api_key_encrypted"     />
+        <result property="apiVersion"            column="api_version"           />
+        <result property="modelVersion"          column="model_version"         />
+        <result property="dailyLimit"            column="daily_limit"           />
+        <result property="monthlyTokenLimit"     column="monthly_token_limit"   />
+        <result property="timeoutSeconds"        column="timeout_seconds"       />
+        <result property="retryTimes"            column="retry_times"           />
+        <result property="priority"              column="priority"              />
+        <result property="maxTemperature"        column="max_temperature"       />
+        <result property="temperature"           column="temperature"           />
+        <result property="topP"                  column="top_p"                 />
+        <result property="maxTokens"             column="max_tokens"            />
+        <result property="isEnabled"             column="is_enabled"            />
+        <result property="isDefault"             column="is_default"            />
+        <result property="usageCount"            column="usage_count"           />
+        <result property="description"           column="description"           />
+        <result property="createBy"              column="create_by"             />
+        <result property="createTime"            column="create_time"           />
+        <result property="updateBy"              column="update_by"             />
+        <result property="updateTime"            column="update_time"           />
+    </resultMap>
+
+    <sql id="selectAiModelConfigVo">
+        select id, model_key, model_code, model_name, provider, api_endpoint, api_key_encrypted,
+               api_version, model_version, daily_limit, monthly_token_limit, timeout_seconds, retry_times,
+               priority, max_temperature, temperature, top_p, max_tokens,
+               is_enabled, is_default, usage_count, description, create_by, create_time, update_by, update_time
+        from ai_model_config
+    </sql>
+
+    <select id="selectAiModelConfigById" parameterType="Long" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectAiModelConfigList" parameterType="AiModelConfig" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        <where>
+            <if test="modelName != null and modelName != ''">
+                AND model_name like concat('%', #{modelName}, '%')
+            </if>
+            <if test="modelCode != null and modelCode != ''">
+                AND model_code like concat('%', #{modelCode}, '%')
+            </if>
+            <if test="provider != null and provider != ''">
+                AND provider = #{provider}
+            </if>
+            <if test="isEnabled != null">
+                AND is_enabled = #{isEnabled}
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                AND date_format(create_time,'%Y%m%d') &gt;= date_format(#{params.beginTime},'%Y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                AND date_format(create_time,'%Y%m%d') &lt;= date_format(#{params.endTime},'%Y%m%d')
+            </if>
+        </where>
+        order by is_default desc, provider asc, priority asc, id asc
+    </select>
+
+    <select id="selectDefaultModel" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        where is_enabled = 1
+          and is_default = 1
+        order by priority asc, id asc
+        limit 1
+    </select>
+
+    <select id="selectFirstEnabledModel" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        where is_enabled = 1
+        order by priority asc, id asc
+        limit 1
+    </select>
+
+    <select id="selectByModelCode" parameterType="String" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        where model_code = #{modelCode}
+    </select>
+
+    <select id="checkModelCodeUnique" parameterType="String" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        where model_code = #{modelCode} limit 1
+    </select>
+
+    <select id="selectEnabledModels" parameterType="String" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        where is_enabled = 1
+        <if test="provider != null and provider != ''">
+            AND provider = #{provider}
+        </if>
+        order by is_default desc, priority asc, id asc
+    </select>
+
+    <insert id="insertAiModelConfig" parameterType="AiModelConfig" useGeneratedKeys="true" keyProperty="id">
+        insert into ai_model_config
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="modelKey != null and modelKey != ''">model_key,</if>
+            <if test="modelCode != null and modelCode != ''">model_code,</if>
+            <if test="modelName != null and modelName != ''">model_name,</if>
+            <if test="provider != null and provider != ''">provider,</if>
+            <if test="apiEndpoint != null and apiEndpoint != ''">api_endpoint,</if>
+            <if test="apiKeyEncrypted != null and apiKeyEncrypted != ''">api_key_encrypted,</if>
+            <if test="apiVersion != null and apiVersion != ''">api_version,</if>
+            <if test="modelVersion != null and modelVersion != ''">model_version,</if>
+            <if test="dailyLimit != null">daily_limit,</if>
+            <if test="monthlyTokenLimit != null">monthly_token_limit,</if>
+            <if test="timeoutSeconds != null">timeout_seconds,</if>
+            <if test="retryTimes != null">retry_times,</if>
+            <if test="priority != null">priority,</if>
+            <if test="maxTemperature != null">max_temperature,</if>
+            <if test="temperature != null">temperature,</if>
+            <if test="topP != null">top_p,</if>
+            <if test="maxTokens != null">max_tokens,</if>
+            <if test="isEnabled != null">is_enabled,</if>
+            <if test="isDefault != null">is_default,</if>
+            <if test="usageCount != null">usage_count,</if>
+            <if test="description != null">description,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="modelKey != null and modelKey != ''">#{modelKey},</if>
+            <if test="modelCode != null and modelCode != ''">#{modelCode},</if>
+            <if test="modelName != null and modelName != ''">#{modelName},</if>
+            <if test="provider != null and provider != ''">#{provider},</if>
+            <if test="apiEndpoint != null and apiEndpoint != ''">#{apiEndpoint},</if>
+            <if test="apiKeyEncrypted != null and apiKeyEncrypted != ''">#{apiKeyEncrypted},</if>
+            <if test="apiVersion != null and apiVersion != ''">#{apiVersion},</if>
+            <if test="modelVersion != null and modelVersion != ''">#{modelVersion},</if>
+            <if test="dailyLimit != null">#{dailyLimit},</if>
+            <if test="monthlyTokenLimit != null">#{monthlyTokenLimit},</if>
+            <if test="timeoutSeconds != null">#{timeoutSeconds},</if>
+            <if test="retryTimes != null">#{retryTimes},</if>
+            <if test="priority != null">#{priority},</if>
+            <if test="maxTemperature != null">#{maxTemperature},</if>
+            <if test="temperature != null">#{temperature},</if>
+            <if test="topP != null">#{topP},</if>
+            <if test="maxTokens != null">#{maxTokens},</if>
+            <if test="isEnabled != null">#{isEnabled},</if>
+            <if test="isDefault != null">#{isDefault},</if>
+            <if test="usageCount != null">#{usageCount},</if>
+            <if test="description != null">#{description},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+         </trim>
+    </insert>
+
+    <update id="updateAiModelConfig" parameterType="AiModelConfig">
+        update ai_model_config
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="modelKey != null and modelKey != ''">model_key = #{modelKey},</if>
+            <if test="modelCode != null and modelCode != ''">model_code = #{modelCode},</if>
+            <if test="modelName != null and modelName != ''">model_name = #{modelName},</if>
+            <if test="provider != null and provider != ''">provider = #{provider},</if>
+            <if test="apiEndpoint != null">api_endpoint = #{apiEndpoint},</if>
+            <if test="apiKeyEncrypted != null">api_key_encrypted = #{apiKeyEncrypted},</if>
+            <if test="apiVersion != null">api_version = #{apiVersion},</if>
+            <if test="modelVersion != null">model_version = #{modelVersion},</if>
+            <if test="dailyLimit != null">daily_limit = #{dailyLimit},</if>
+            <if test="monthlyTokenLimit != null">monthly_token_limit = #{monthlyTokenLimit},</if>
+            <if test="timeoutSeconds != null">timeout_seconds = #{timeoutSeconds},</if>
+            <if test="retryTimes != null">retry_times = #{retryTimes},</if>
+            <if test="priority != null">priority = #{priority},</if>
+            <if test="maxTemperature != null">max_temperature = #{maxTemperature},</if>
+            <if test="temperature != null">temperature = #{temperature},</if>
+            <if test="topP != null">top_p = #{topP},</if>
+            <if test="maxTokens != null">max_tokens = #{maxTokens},</if>
+            <if test="isEnabled != null">is_enabled = #{isEnabled},</if>
+            <if test="isDefault != null">is_default = #{isDefault},</if>
+            <if test="usageCount != null">usage_count = #{usageCount},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteAiModelConfigById" parameterType="Long">
+        delete from ai_model_config where id = #{id}
+    </delete>
+
+    <delete id="deleteAiModelConfigByIds" parameterType="String">
+        delete from ai_model_config where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <update id="incrementUsageCount" parameterType="Long">
+        update ai_model_config
+        set usage_count = usage_count + 1
+        where id = #{id}
+    </update>
+
+    <update id="incrementUsageByModelCode" parameterType="String">
+        update ai_model_config
+        set usage_count = usage_count + 1
+        where model_code = #{modelCode}
+    </update>
+
+    <update id="cancelAllDefaultModels">
+        update ai_model_config
+        set is_default = 0,
+            update_time = sysdate()
+        where is_default = 1
+    </update>
+
+</mapper>

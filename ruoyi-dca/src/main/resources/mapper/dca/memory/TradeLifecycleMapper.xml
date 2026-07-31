@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.memory.TradeLifecycleMapper">
+
+    <resultMap id="TradeLifecycleResult" type="com.ruoyi.dca.domain.memory.TradeLifecycle">
+        <id property="id" column="id"/>
+        <result property="traceId" column="trace_id"/>
+        <result property="symbol" column="symbol"/>
+        <result property="exchangeCode" column="exchange_code"/>
+        <result property="side" column="side"/>
+        <result property="entryPrice" column="entry_price"/>
+        <result property="entryTime" column="entry_time"/>
+        <result property="entryReason" column="entry_reason"/>
+        <result property="entryConditionsJson" column="entry_conditions_json"/>
+        <result property="agentViewsJson" column="agent_views_json"/>
+        <result property="supervisorDecisionJson" column="supervisor_decision_json"/>
+        <result property="priceTrajectoryJson" column="price_trajectory_json"/>
+        <result property="maxFavorablePct" column="max_favorable_pct"/>
+        <result property="maxAdversePct" column="max_adverse_pct"/>
+        <result property="holdingMinutes" column="holding_minutes"/>
+        <result property="exitPrice" column="exit_price"/>
+        <result property="exitTime" column="exit_time"/>
+        <result property="exitReason" column="exit_reason"/>
+        <result property="realizedPnlPct" column="realized_pnl_pct"/>
+        <result property="memoryGenerated" column="memory_generated"/>
+        <result property="lessonText" column="lesson_text"/>
+        <result property="memoryStatus" column="memory_status"/>
+        <result property="memoryReason" column="memory_reason"/>
+        <result property="addOperationsJson" column="add_operations_json"/>
+        <result property="reduceOperationsJson" column="reduce_operations_json"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <insert id="insertTradeLifecycle" parameterType="com.ruoyi.dca.domain.memory.TradeLifecycle" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_lifecycle (
+            trace_id, symbol, exchange_code, side, entry_price, entry_time, entry_reason,
+            entry_conditions_json, agent_views_json, supervisor_decision_json, price_trajectory_json,
+            max_favorable_pct, max_adverse_pct, holding_minutes, memory_generated,
+            lesson_text, memory_status, memory_reason, add_operations_json, reduce_operations_json
+        ) values (
+            #{traceId}, #{symbol}, #{exchangeCode}, #{side}, #{entryPrice}, #{entryTime}, #{entryReason},
+            #{entryConditionsJson}, #{agentViewsJson}, #{supervisorDecisionJson}, #{priceTrajectoryJson},
+            #{maxFavorablePct}, #{maxAdversePct}, #{holdingMinutes}, #{memoryGenerated},
+            #{lessonText}, #{memoryStatus}, #{memoryReason}, #{addOperationsJson}, #{reduceOperationsJson}
+        )
+    </insert>
+
+    <select id="selectByTraceId" resultMap="TradeLifecycleResult">
+        select * from trade_lifecycle where trace_id = #{traceId}
+    </select>
+
+    <update id="updateTradeLifecycle" parameterType="com.ruoyi.dca.domain.memory.TradeLifecycle">
+        update trade_lifecycle
+        set exit_price = #{exitPrice},
+            exit_time = #{exitTime},
+            exit_reason = #{exitReason},
+            realized_pnl_pct = #{realizedPnlPct},
+            holding_minutes = #{holdingMinutes},
+            memory_generated = #{memoryGenerated},
+            lesson_text = #{lessonText},
+            memory_status = #{memoryStatus},
+            memory_reason = #{memoryReason},
+            add_operations_json = #{addOperationsJson},
+            reduce_operations_json = #{reduceOperationsJson}
+        where trace_id = #{traceId}
+    </update>
+
+    <update id="updateExitInfo">
+        update trade_lifecycle
+        set exit_price = #{exitPrice},
+            exit_time = #{exitTime},
+            exit_reason = #{exitReason},
+            realized_pnl_pct = #{realizedPnlPct},
+            holding_minutes = #{holdingMinutes}
+        where trace_id = #{traceId}
+    </update>
+
+    <update id="updateMemoryGenerated">
+        update trade_lifecycle
+        set memory_generated = #{memoryGenerated},
+            lesson_text = #{lessonText},
+            memory_status = #{memoryStatus},
+            memory_reason = #{memoryReason}
+        where trace_id = #{traceId}
+    </update>
+
+    <select id="selectClosedLifecycles" resultMap="TradeLifecycleResult">
+        select * from trade_lifecycle
+        where exit_price is not null
+          and exit_time is not null
+          and memory_generated = 0
+          and (memory_status is null or memory_status = '' or memory_status = 'failed' or memory_status = 'rejected')
+        order by exit_time desc
+        limit #{limit}
+    </select>
+</mapper>

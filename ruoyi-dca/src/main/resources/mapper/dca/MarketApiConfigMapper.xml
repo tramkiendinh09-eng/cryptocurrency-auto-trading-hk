@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.MarketApiConfigMapper">
+
+    <resultMap type="com.ruoyi.dca.domain.MarketApiConfig" id="MarketApiConfigResult">
+        <result property="id" column="id"/>
+        <result property="versionNo" column="version_no"/>
+        <result property="configName" column="config_name"/>
+        <result property="dataCategory" column="data_category"/>
+        <result property="dataSubType" column="data_sub_type"/>
+        <result property="transportType" column="transport_type"/>
+        <result property="vendorCode" column="vendor_code"/>
+        <result property="marketScope" column="market_scope"/>
+        <result property="apiName" column="api_name"/>
+        <result property="apiUrl" column="api_url"/>
+        <result property="wsBaseUrl" column="ws_base_url"/>
+        <result property="wsPath" column="ws_path"/>
+        <result property="wsStreamNameTemplate" column="ws_stream_name_template"/>
+        <result property="wsCombinedEnabled" column="ws_combined_enabled"/>
+        <result property="wsSymbolLowercase" column="ws_symbol_lowercase"/>
+        <result property="wsPingIntervalSeconds" column="ws_ping_interval_seconds"/>
+        <result property="wsPongTimeoutSeconds" column="ws_pong_timeout_seconds"/>
+        <result property="wsConnectionTtlHours" column="ws_connection_ttl_hours"/>
+        <result property="wsMaxStreamsPerConnection" column="ws_max_streams_per_connection"/>
+        <result property="wsControlMessagesPerSecond" column="ws_control_messages_per_second"/>
+        <result property="docReferenceUrl" column="doc_reference_url"/>
+        <result property="httpMethod" column="http_method"/>
+        <result property="requestHeaders" column="request_headers"/>
+        <result property="requestBody" column="request_body"/>
+        <result property="responsePath" column="response_path"/>
+        <result property="fieldMapping" column="field_mapping"/>
+        <result property="timeout" column="timeout"/>
+        <result property="enabled" column="enabled"/>
+        <result property="priority" column="priority"/>
+        <result property="retryCount" column="retry_count"/>
+        <result property="retryInterval" column="retry_interval"/>
+        <result property="dataTransform" column="data_transform"/>
+        <result property="useProxy" column="use_proxy"/>
+        <result property="proxyUrl" column="proxy_url"/>
+        <result property="applySymbols" column="apply_symbols"/>
+        <result property="remark" column="remark"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="selectMarketApiConfigVo">
+        select id, version_no, config_name, data_category, data_sub_type, transport_type, vendor_code, market_scope,
+               api_name, api_url, ws_base_url, ws_path, ws_stream_name_template, ws_combined_enabled,
+               ws_symbol_lowercase, ws_ping_interval_seconds, ws_pong_timeout_seconds, ws_connection_ttl_hours,
+               ws_max_streams_per_connection, ws_control_messages_per_second, doc_reference_url, http_method,
+               request_headers, request_body, response_path, field_mapping, timeout, enabled,
+               priority, retry_count, retry_interval, data_transform, use_proxy, proxy_url, apply_symbols, remark,
+               create_by, create_time, update_by, update_time
+        from market_api_config
+    </sql>
+
+    <select id="selectMarketApiConfigList" parameterType="com.ruoyi.dca.domain.MarketApiConfig" resultMap="MarketApiConfigResult">
+        <include refid="selectMarketApiConfigVo"/>
+        <where>
+            <if test="configName != null and configName != ''">
+                and config_name like concat('%', #{configName}, '%')
+            </if>
+            <if test="dataCategory != null and dataCategory != ''">
+                and data_category = #{dataCategory}
+            </if>
+            <if test="transportType != null and transportType != ''">
+                and transport_type = #{transportType}
+            </if>
+            <if test="vendorCode != null and vendorCode != ''">
+                and vendor_code = #{vendorCode}
+            </if>
+            <if test="apiName != null and apiName != ''">
+                and api_name like concat('%', #{apiName}, '%')
+            </if>
+            <if test="enabled != null and enabled != ''">
+                and enabled = #{enabled}
+            </if>
+        </where>
+        order by priority asc, id asc
+    </select>
+
+    <select id="selectMarketApiConfigById" parameterType="Long" resultMap="MarketApiConfigResult">
+        <include refid="selectMarketApiConfigVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectEnabledApis" parameterType="String" resultMap="MarketApiConfigResult">
+        <include refid="selectMarketApiConfigVo"/>
+        where enabled = '1'
+        <if test="dataCategory != null and dataCategory != ''">
+            and data_category = #{dataCategory}
+        </if>
+        order by priority asc, id asc
+    </select>
+
+    <select id="selectApiByName" parameterType="String" resultMap="MarketApiConfigResult">
+        <include refid="selectMarketApiConfigVo"/>
+        where api_name = #{apiName}
+    </select>
+
+    <insert id="insertMarketApiConfig" parameterType="com.ruoyi.dca.domain.MarketApiConfig" useGeneratedKeys="true" keyProperty="id">
+        insert into market_api_config
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="versionNo != null">version_no,</if>
+            <if test="configName != null and configName != ''">config_name,</if>
+            <if test="dataCategory != null and dataCategory != ''">data_category,</if>
+            <if test="dataSubType != null">data_sub_type,</if>
+            <if test="transportType != null">transport_type,</if>
+            <if test="vendorCode != null">vendor_code,</if>
+            <if test="marketScope != null">market_scope,</if>
+            <if test="apiName != null and apiName != ''">api_name,</if>
+            <if test="apiUrl != null and apiUrl != ''">api_url,</if>
+            <if test="wsBaseUrl != null">ws_base_url,</if>
+            <if test="wsPath != null">ws_path,</if>
+            <if test="wsStreamNameTemplate != null">ws_stream_name_template,</if>
+            <if test="wsCombinedEnabled != null">ws_combined_enabled,</if>
+            <if test="wsSymbolLowercase != null">ws_symbol_lowercase,</if>
+            <if test="wsPingIntervalSeconds != null">ws_ping_interval_seconds,</if>
+            <if test="wsPongTimeoutSeconds != null">ws_pong_timeout_seconds,</if>
+            <if test="wsConnectionTtlHours != null">ws_connection_ttl_hours,</if>
+            <if test="wsMaxStreamsPerConnection != null">ws_max_streams_per_connection,</if>
+            <if test="wsControlMessagesPerSecond != null">ws_control_messages_per_second,</if>
+            <if test="docReferenceUrl != null">doc_reference_url,</if>
+            <if test="httpMethod != null">http_method,</if>
+            <if test="requestHeaders != null">request_headers,</if>
+            <if test="requestBody != null">request_body,</if>
+            <if test="responsePath != null">response_path,</if>
+            <if test="fieldMapping != null">field_mapping,</if>
+            <if test="timeout != null">timeout,</if>
+            <if test="enabled != null">enabled,</if>
+            <if test="priority != null">priority,</if>
+            <if test="retryCount != null">retry_count,</if>
+            <if test="retryInterval != null">retry_interval,</if>
+            <if test="dataTransform != null">data_transform,</if>
+            <if test="useProxy != null">use_proxy,</if>
+            <if test="proxyUrl != null">proxy_url,</if>
+            <if test="applySymbols != null">apply_symbols,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateBy != null">update_by,</if>
+            <if test="updateTime != null">update_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="versionNo != null">#{versionNo},</if>
+            <if test="configName != null and configName != ''">#{configName},</if>
+            <if test="dataCategory != null and dataCategory != ''">#{dataCategory},</if>
+            <if test="dataSubType != null">#{dataSubType},</if>
+            <if test="transportType != null">#{transportType},</if>
+            <if test="vendorCode != null">#{vendorCode},</if>
+            <if test="marketScope != null">#{marketScope},</if>
+            <if test="apiName != null and apiName != ''">#{apiName},</if>
+            <if test="apiUrl != null and apiUrl != ''">#{apiUrl},</if>
+            <if test="wsBaseUrl != null">#{wsBaseUrl},</if>
+            <if test="wsPath != null">#{wsPath},</if>
+            <if test="wsStreamNameTemplate != null">#{wsStreamNameTemplate},</if>
+            <if test="wsCombinedEnabled != null">#{wsCombinedEnabled},</if>
+            <if test="wsSymbolLowercase != null">#{wsSymbolLowercase},</if>
+            <if test="wsPingIntervalSeconds != null">#{wsPingIntervalSeconds},</if>
+            <if test="wsPongTimeoutSeconds != null">#{wsPongTimeoutSeconds},</if>
+            <if test="wsConnectionTtlHours != null">#{wsConnectionTtlHours},</if>
+            <if test="wsMaxStreamsPerConnection != null">#{wsMaxStreamsPerConnection},</if>
+            <if test="wsControlMessagesPerSecond != null">#{wsControlMessagesPerSecond},</if>
+            <if test="docReferenceUrl != null">#{docReferenceUrl},</if>
+            <if test="httpMethod != null">#{httpMethod},</if>
+            <if test="requestHeaders != null">#{requestHeaders},</if>
+            <if test="requestBody != null">#{requestBody},</if>
+            <if test="responsePath != null">#{responsePath},</if>
+            <if test="fieldMapping != null">#{fieldMapping},</if>
+            <if test="timeout != null">#{timeout},</if>
+            <if test="enabled != null">#{enabled},</if>
+            <if test="priority != null">#{priority},</if>
+            <if test="retryCount != null">#{retryCount},</if>
+            <if test="retryInterval != null">#{retryInterval},</if>
+            <if test="dataTransform != null">#{dataTransform},</if>
+            <if test="useProxy != null">#{useProxy},</if>
+            <if test="proxyUrl != null">#{proxyUrl},</if>
+            <if test="applySymbols != null">#{applySymbols},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateBy != null">#{updateBy},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+        </trim>
+    </insert>
+
+    <update id="updateMarketApiConfig" parameterType="com.ruoyi.dca.domain.MarketApiConfig">
+        update market_api_config
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="versionNo != null">version_no = #{versionNo},</if>
+            <if test="configName != null and configName != ''">config_name = #{configName},</if>
+            <if test="dataCategory != null and dataCategory != ''">data_category = #{dataCategory},</if>
+            <if test="dataSubType != null">data_sub_type = #{dataSubType},</if>
+            <if test="transportType != null">transport_type = #{transportType},</if>
+            <if test="vendorCode != null">vendor_code = #{vendorCode},</if>
+            <if test="marketScope != null">market_scope = #{marketScope},</if>
+            <if test="apiName != null and apiName != ''">api_name = #{apiName},</if>
+            <if test="apiUrl != null and apiUrl != ''">api_url = #{apiUrl},</if>
+            <if test="wsBaseUrl != null">ws_base_url = #{wsBaseUrl},</if>
+            <if test="wsPath != null">ws_path = #{wsPath},</if>
+            <if test="wsStreamNameTemplate != null">ws_stream_name_template = #{wsStreamNameTemplate},</if>
+            <if test="wsCombinedEnabled != null">ws_combined_enabled = #{wsCombinedEnabled},</if>
+            <if test="wsSymbolLowercase != null">ws_symbol_lowercase = #{wsSymbolLowercase},</if>
+            <if test="wsPingIntervalSeconds != null">ws_ping_interval_seconds = #{wsPingIntervalSeconds},</if>
+            <if test="wsPongTimeoutSeconds != null">ws_pong_timeout_seconds = #{wsPongTimeoutSeconds},</if>
+            <if test="wsConnectionTtlHours != null">ws_connection_ttl_hours = #{wsConnectionTtlHours},</if>
+            <if test="wsMaxStreamsPerConnection != null">ws_max_streams_per_connection = #{wsMaxStreamsPerConnection},</if>
+            <if test="wsControlMessagesPerSecond != null">ws_control_messages_per_second = #{wsControlMessagesPerSecond},</if>
+            <if test="docReferenceUrl != null">doc_reference_url = #{docReferenceUrl},</if>
+            <if test="httpMethod != null">http_method = #{httpMethod},</if>
+            <if test="requestHeaders != null">request_headers = #{requestHeaders},</if>
+            <if test="requestBody != null">request_body = #{requestBody},</if>
+            <if test="responsePath != null">response_path = #{responsePath},</if>
+            <if test="fieldMapping != null">field_mapping = #{fieldMapping},</if>
+            <if test="timeout != null">timeout = #{timeout},</if>
+            <if test="enabled != null">enabled = #{enabled},</if>
+            <if test="priority != null">priority = #{priority},</if>
+            <if test="retryCount != null">retry_count = #{retryCount},</if>
+            <if test="retryInterval != null">retry_interval = #{retryInterval},</if>
+            <if test="dataTransform != null">data_transform = #{dataTransform},</if>
+            <if test="useProxy != null">use_proxy = #{useProxy},</if>
+            <if test="proxyUrl != null">proxy_url = #{proxyUrl},</if>
+            <if test="applySymbols != null">apply_symbols = #{applySymbols},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </trim>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteMarketApiConfigById" parameterType="Long">
+        delete from market_api_config where id = #{id}
+    </delete>
+
+    <delete id="deleteMarketApiConfigByIds" parameterType="String">
+        delete from market_api_config where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

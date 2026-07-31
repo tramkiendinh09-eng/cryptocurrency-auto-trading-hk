@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.TradePromptBindingMapper">
+
+    <resultMap id="TradePromptBindingResult" type="com.ruoyi.dca.domain.trade.TradePromptBinding">
+        <id property="id" column="id"/>
+        <result property="bindingName" column="binding_name"/>
+        <result property="strategyId" column="strategy_id"/>
+        <result property="strategyVersionId" column="strategy_version_id"/>
+        <result property="symbol" column="symbol"/>
+        <result property="exchangeCode" column="exchange_code"/>
+        <result property="bindingScope" column="binding_scope"/>
+        <result property="templateCode" column="template_code"/>
+        <result property="fallbackTemplateCode" column="fallback_template_code"/>
+        <result property="modelId" column="model_id"/>
+        <result property="outputSchemaCode" column="output_schema_code"/>
+        <result property="priority" column="priority"/>
+        <result property="modeScopeJson" column="mode_scope_json"/>
+        <result property="eventStrengthScopeJson" column="event_strength_scope_json"/>
+        <result property="enabled" column="enabled"/>
+        <result property="remark" column="remark"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="tradePromptBindingColumns">
+        id, binding_name, strategy_id, strategy_version_id, symbol, exchange_code, binding_scope,
+        template_code, fallback_template_code, model_id, output_schema_code, priority,
+        mode_scope_json, event_strength_scope_json, enabled, remark, created_at, updated_at
+    </sql>
+
+    <select id="selectTradePromptBindingList" parameterType="com.ruoyi.dca.domain.trade.TradePromptBinding" resultMap="TradePromptBindingResult">
+        select <include refid="tradePromptBindingColumns"/>
+        from trade_prompt_binding
+        <where>
+            <if test="bindingName != null and bindingName != ''">
+                and binding_name like concat('%', #{bindingName}, '%')
+            </if>
+            <if test="strategyId != null">
+                and strategy_id = #{strategyId}
+            </if>
+            <if test="strategyVersionId != null">
+                and strategy_version_id = #{strategyVersionId}
+            </if>
+            <if test="symbol != null and symbol != ''">
+                and symbol = #{symbol}
+            </if>
+            <if test="exchangeCode != null and exchangeCode != ''">
+                and exchange_code = #{exchangeCode}
+            </if>
+            <if test="bindingScope != null and bindingScope != ''">
+                and binding_scope = #{bindingScope}
+            </if>
+            <if test="templateCode != null and templateCode != ''">
+                and template_code = #{templateCode}
+            </if>
+            <if test="enabled != null">
+                and enabled = #{enabled}
+            </if>
+        </where>
+        order by priority asc, id desc
+    </select>
+
+    <select id="selectTradePromptBindingById" resultMap="TradePromptBindingResult">
+        select <include refid="tradePromptBindingColumns"/>
+        from trade_prompt_binding
+        where id = #{id}
+    </select>
+
+    <insert id="insertTradePromptBinding" parameterType="com.ruoyi.dca.domain.trade.TradePromptBinding" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_prompt_binding (
+            binding_name,
+            strategy_id,
+            strategy_version_id,
+            symbol,
+            exchange_code,
+            binding_scope,
+            template_code,
+            fallback_template_code,
+            model_id,
+            output_schema_code,
+            priority,
+            mode_scope_json,
+            event_strength_scope_json,
+            enabled,
+            remark
+        ) values (
+            #{bindingName},
+            #{strategyId},
+            #{strategyVersionId},
+            #{symbol},
+            #{exchangeCode},
+            #{bindingScope},
+            #{templateCode},
+            #{fallbackTemplateCode},
+            #{modelId},
+            #{outputSchemaCode},
+            #{priority},
+            #{modeScopeJson},
+            #{eventStrengthScopeJson},
+            #{enabled},
+            #{remark}
+        )
+    </insert>
+
+    <update id="updateTradePromptBinding" parameterType="com.ruoyi.dca.domain.trade.TradePromptBinding">
+        update trade_prompt_binding
+        <set>
+            <if test="bindingName != null">binding_name = #{bindingName},</if>
+            strategy_id = #{strategyId},
+            strategy_version_id = #{strategyVersionId},
+            symbol = #{symbol},
+            exchange_code = #{exchangeCode},
+            <if test="bindingScope != null">binding_scope = #{bindingScope},</if>
+            <if test="templateCode != null">template_code = #{templateCode},</if>
+            fallback_template_code = #{fallbackTemplateCode},
+            model_id = #{modelId},
+            <if test="outputSchemaCode != null">output_schema_code = #{outputSchemaCode},</if>
+            <if test="priority != null">priority = #{priority},</if>
+            <if test="modeScopeJson != null">mode_scope_json = #{modeScopeJson},</if>
+            <if test="eventStrengthScopeJson != null">event_strength_scope_json = #{eventStrengthScopeJson},</if>
+            <if test="enabled != null">enabled = #{enabled},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            updated_at = now()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteTradePromptBindingByIds">
+        delete from trade_prompt_binding
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

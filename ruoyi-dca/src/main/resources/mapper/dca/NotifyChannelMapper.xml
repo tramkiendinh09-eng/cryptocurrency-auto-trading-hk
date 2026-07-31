@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.NotifyChannelMapper">
+
+    <resultMap type="NotifyChannel" id="NotifyChannelResult">
+        <id     property="id"           column="id"           />
+        <result property="userId"       column="user_id"      />
+        <result property="channelType"  column="channel_type" />
+        <result property="channelName"  column="channel_name" />
+        <result property="webhookUrl"   column="webhook_url"  />
+        <result property="token"        column="token"        />
+        <result property="recipient"    column="recipient"    />
+        <result property="smtpHost"     column="smtp_host"    />
+        <result property="smtpPort"     column="smtp_port"    />
+        <result property="mailUsername" column="mail_username"/>
+        <result property="mailPassword" column="mail_password"/>
+        <result property="mailFrom"     column="mail_from"    />
+        <result property="isEnabled"    column="is_enabled"   />
+        <result property="remark"       column="remark"       />
+        <result property="createBy"     column="create_by"    />
+        <result property="createTime"   column="create_time"  />
+        <result property="updateBy"     column="update_by"    />
+        <result property="updateTime"   column="update_time"  />
+    </resultMap>
+
+    <sql id="selectNotifyChannelVo">
+        select id, user_id, channel_type, channel_name, webhook_url, token, recipient,
+               smtp_host, smtp_port, mail_username, mail_password, mail_from, is_enabled,
+               remark, create_by, create_time, update_by, update_time
+        from notify_channel
+    </sql>
+
+    <select id="selectNotifyChannelById" parameterType="Long" resultMap="NotifyChannelResult">
+        <include refid="selectNotifyChannelVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectNotifyChannelList" parameterType="NotifyChannel" resultMap="NotifyChannelResult">
+        <include refid="selectNotifyChannelVo"/>
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="channelType != null and channelType != ''">
+                AND channel_type = #{channelType}
+            </if>
+            <if test="channelName != null and channelName != ''">
+                AND channel_name like concat('%', #{channelName}, '%')
+            </if>
+            <if test="isEnabled != null">
+                AND is_enabled = #{isEnabled}
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                AND date_format(create_time,'%Y%m%d') &gt;= date_format(#{params.beginTime},'%Y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                AND date_format(create_time,'%Y%m%d') &lt;= date_format(#{params.endTime},'%Y%m%d')
+            </if>
+        </where>
+        order by create_time desc
+    </select>
+
+    <select id="selectByChannelType" parameterType="String" resultMap="NotifyChannelResult">
+        <include refid="selectNotifyChannelVo"/>
+        where channel_type = #{channelType}
+        order by create_time desc
+    </select>
+
+    <select id="selectEnabledByUserId" parameterType="Long" resultMap="NotifyChannelResult">
+        <include refid="selectNotifyChannelVo"/>
+        where user_id = #{userId}
+        and is_enabled = 1
+        order by create_time desc
+    </select>
+
+    <select id="selectAllEnabled" resultMap="NotifyChannelResult">
+        <include refid="selectNotifyChannelVo"/>
+        where is_enabled = 1
+        order by create_time desc
+    </select>
+
+    <select id="checkChannelNameUnique" resultType="int">
+        select count(*) from notify_channel
+        where channel_name = #{channelName}
+        <if test="userId != null">
+            and user_id = #{userId}
+        </if>
+        limit 1
+    </select>
+
+    <select id="countByType" resultType="java.util.HashMap">
+        select channel_type as name, count(*) as value
+        from notify_channel
+        group by channel_type
+    </select>
+
+    <insert id="insertNotifyChannel" parameterType="NotifyChannel" useGeneratedKeys="true" keyProperty="id">
+        insert into notify_channel
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="userId != null">user_id,</if>
+            <if test="channelType != null and channelType != ''">channel_type,</if>
+            <if test="channelName != null and channelName != ''">channel_name,</if>
+            <if test="webhookUrl != null">webhook_url,</if>
+            <if test="token != null">token,</if>
+            <if test="recipient != null">recipient,</if>
+            <if test="smtpHost != null">smtp_host,</if>
+            <if test="smtpPort != null">smtp_port,</if>
+            <if test="mailUsername != null">mail_username,</if>
+            <if test="mailPassword != null">mail_password,</if>
+            <if test="mailFrom != null">mail_from,</if>
+            <if test="isEnabled != null">is_enabled,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="userId != null">#{userId},</if>
+            <if test="channelType != null and channelType != ''">#{channelType},</if>
+            <if test="channelName != null and channelName != ''">#{channelName},</if>
+            <if test="webhookUrl != null">#{webhookUrl},</if>
+            <if test="token != null">#{token},</if>
+            <if test="recipient != null">#{recipient},</if>
+            <if test="smtpHost != null">#{smtpHost},</if>
+            <if test="smtpPort != null">#{smtpPort},</if>
+            <if test="mailUsername != null">#{mailUsername},</if>
+            <if test="mailPassword != null">#{mailPassword},</if>
+            <if test="mailFrom != null">#{mailFrom},</if>
+            <if test="isEnabled != null">#{isEnabled},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+         </trim>
+    </insert>
+
+    <update id="updateNotifyChannel" parameterType="NotifyChannel">
+        update notify_channel
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="channelType != null and channelType != ''">channel_type = #{channelType},</if>
+            <if test="channelName != null and channelName != ''">channel_name = #{channelName},</if>
+            <if test="webhookUrl != null">webhook_url = #{webhookUrl},</if>
+            <if test="token != null">token = #{token},</if>
+            <if test="recipient != null">recipient = #{recipient},</if>
+            <if test="smtpHost != null">smtp_host = #{smtpHost},</if>
+            <if test="smtpPort != null">smtp_port = #{smtpPort},</if>
+            <if test="mailUsername != null">mail_username = #{mailUsername},</if>
+            <if test="mailPassword != null">mail_password = #{mailPassword},</if>
+            <if test="mailFrom != null">mail_from = #{mailFrom},</if>
+            <if test="isEnabled != null">is_enabled = #{isEnabled},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </trim>
+        where id = #{id}
+    </update>
+
+    <update id="updateEnabledStatus">
+        update notify_channel set is_enabled = #{isEnabled}, update_time = sysdate() where id = #{id}
+    </update>
+
+    <update id="batchUpdateEnabledStatus">
+        update notify_channel set is_enabled = #{isEnabled}, update_time = sysdate()
+        where id in
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <delete id="deleteNotifyChannelById" parameterType="Long">
+        delete from notify_channel where id = #{id}
+    </delete>
+
+    <delete id="deleteNotifyChannelByIds" parameterType="Long">
+        delete from notify_channel where id in
+        <foreach collection="array" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+</mapper>

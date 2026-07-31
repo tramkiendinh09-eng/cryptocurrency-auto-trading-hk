@@ -1,0 +1,81 @@
+######################################################################
+# Build Tools
+
+.gradle
+/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+######################################################################
+# IDE
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+.vscode/
+
+### JRebel ###
+rebel.xml
+
+### NetBeans ###
+nbproject/private/
+build/*
+nbbuild/
+dist/
+nbdist/
+.nb-graduate/
+node_modules/
+
+######################################################################
+# Others
+*.log
+*.xml.versionsBackup
+*.swp
+
+!*/build/*.java
+!*/build/*.html
+!*/build/*.xml
+
+artifacts/*
+!artifacts/.gitkeep
+deploy/.env
+deploy/data/
+*.tgz
+
+######################################################################
+# Secrets / Local environment
+.env
+!.env.example
+**/.env
+!**/.env.example
+
+######################################################################
+# 敏感数据与本地运行残留（含真实凭据/IP/邮箱，禁止入库）
+# 大文件（超过 GitHub 100MB 限制的数据库导出）
+sql/ai_trading.sql
+sql/ai_trading_online.sql
+sql/ai_trading_online.*.sql
+feed-adapter/ai_trading_online.sql
+
+.codex-run/
+.claude/settings.local.json
+.superpowers/
+.worktrees/
+
+######################################################################
+# Python 缓存
+__pycache__/
+.venv/
+.pytest_cache/

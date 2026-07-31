@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.trade.TradeDataSourceHealthLogMapper">
+
+    <insert id="insertTradeDataSourceHealthLog" parameterType="com.ruoyi.dca.domain.trade.TradeDataSourceHealthLog" useGeneratedKeys="true" keyProperty="id">
+        insert into trade_data_source_health_log (
+            source_id,
+            check_type,
+            status,
+            latency_ms,
+            response_excerpt,
+            error_message
+        ) values (
+            #{sourceId},
+            #{checkType},
+            #{status},
+            #{latencyMs},
+            #{responseExcerpt},
+            #{errorMessage}
+        )
+    </insert>
+
+</mapper>

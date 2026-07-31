@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.dca.mapper.AuditAiCallLogMapper">
+
+    <resultMap type="AuditAiCallLog" id="AuditAiCallLogResult">
+        <id     property="id"                 column="id"                 />
+        <result property="userId"             column="user_id"            />
+        <result property="scene"              column="scene"              />
+        <result property="model"              column="model"              />
+        <result property="templateId"         column="template_id"        />
+        <result property="prompt"             column="prompt"             />
+        <result property="response"           column="response"           />
+        <result property="promptTokens"       column="prompt_tokens"      />
+        <result property="completionTokens"   column="completion_tokens"  />
+        <result property="totalTokens"        column="total_tokens"       />
+        <result property="status"             column="status"             />
+        <result property="errorMsg"           column="error_msg"          />
+        <result property="responseTime"       column="response_time"      />
+        <result property="callTime"           column="call_time"          />
+        <result property="remark"             column="remark"             />
+        <result property="createBy"           column="create_by"          />
+        <result property="createTime"         column="create_time"        />
+        <result property="updateBy"           column="update_by"          />
+        <result property="updateTime"         column="update_time"        />
+    </resultMap>
+
+    <sql id="selectAuditAiCallLogVo">
+        select id, user_id, scene, model, template_id, prompt, response,
+               prompt_tokens, completion_tokens, total_tokens, status, error_msg, response_time, call_time,
+               remark, create_by, create_time, update_by, update_time
+        from audit_ai_call_log
+    </sql>
+
+    <select id="selectAuditAiCallLogById" parameterType="Long" resultMap="AuditAiCallLogResult">
+        <include refid="selectAuditAiCallLogVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectAuditAiCallLogList" parameterType="AuditAiCallLog" resultMap="AuditAiCallLogResult">
+        <include refid="selectAuditAiCallLogVo"/>
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="scene != null and scene != ''">
+                AND scene = #{scene}
+            </if>
+            <if test="model != null and model != ''">
+                AND model = #{model}
+            </if>
+            <if test="templateId != null">
+                AND template_id = #{templateId}
+            </if>
+            <if test="status != null">
+                AND status = #{status}
+            </if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                AND date_format(call_time,'%Y%m%d') &gt;= date_format(#{params.beginTime},'%Y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                AND date_format(call_time,'%Y%m%d') &lt;= date_format(#{params.endTime},'%Y%m%d')
+            </if>
+        </where>
+        order by call_time desc
+    </select>
+
+    <insert id="insertAuditAiCallLog" parameterType="AuditAiCallLog" useGeneratedKeys="true" keyProperty="id">
+        insert into audit_ai_call_log (
+            <if test="userId != null">user_id,</if>
+            <if test="scene != null and scene != ''">scene,</if>
+            <if test="model != null and model != ''">model,</if>
+            <if test="templateId != null">template_id,</if>
+            <if test="prompt != null">prompt,</if>
+            <if test="response != null">response,</if>
+            <if test="promptTokens != null">prompt_tokens,</if>
+            <if test="completionTokens != null">completion_tokens,</if>
+            <if test="totalTokens != null">total_tokens,</if>
+            <if test="status != null">status,</if>
+            <if test="errorMsg != null">error_msg,</if>
+            <if test="responseTime != null">response_time,</if>
+            <if test="callTime != null">call_time,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+        )values(
+            <if test="userId != null">#{userId},</if>
+            <if test="scene != null and scene != ''">#{scene},</if>
+            <if test="model != null and model != ''">#{model},</if>
+            <if test="templateId != null">#{templateId},</if>
+            <if test="prompt != null">#{prompt},</if>
+            <if test="response != null">#{response},</if>
+            <if test="promptTokens != null">#{promptTokens},</if>
+            <if test="completionTokens != null">#{completionTokens},</if>
+            <if test="totalTokens != null">#{totalTokens},</if>
+            <if test="status != null">#{status},</if>
+            <if test="errorMsg != null">#{errorMsg},</if>
+            <if test="responseTime != null">#{responseTime},</if>
+            <if test="callTime != null">#{callTime},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+        )
+    </insert>
+
+    <update id="updateAuditAiCallLog" parameterType="AuditAiCallLog">
+        update audit_ai_call_log
+        <set>
+            <if test="response != null">response = #{response},</if>
+            <if test="promptTokens != null">prompt_tokens = #{promptTokens},</if>
+            <if test="completionTokens != null">completion_tokens = #{completionTokens},</if>
+            <if test="totalTokens != null">total_tokens = #{totalTokens},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="errorMsg != null">error_msg = #{errorMsg},</if>
+            <if test="responseTime != null">response_time = #{responseTime},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteAuditAiCallLogById" parameterType="Long">
+        delete from audit_ai_call_log where id = #{id}
+    </delete>
+
+    <delete id="deleteAuditAiCallLogByIds" parameterType="Long">
+        delete from audit_ai_call_log where id in
+        <foreach item="id" collection="array" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <select id="selectAiCallStatistics" parameterType="map" resultType="map">
+        select
+            count(*) as total_count,
+            sum(case when status = 1 then 1 else 0 end) as success_count,
+            sum(case when status = 0 then 1 else 0 end) as fail_count,
+            sum(case when status = 1 then 1 else 0 end) / count(*) * 100 as success_rate,
+            sum(total_tokens) as total_tokens,
+            sum(response_time) / count(*) as avg_response_time,
+            sum(response_time) as total_response_time
+        from audit_ai_call_log
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="scene != null and scene != ''">
+                AND scene = #{scene}
+            </if>
+            <if test="model != null and model != ''">
+                AND model = #{model}
+            </if>
+            <if test="beginTime != null and beginTime != ''">
+                AND date_format(call_time,'%Y%m%d') &gt;= date_format(#{beginTime},'%Y%m%d')
+            </if>
+            <if test="endTime != null and endTime != ''">
+                AND date_format(call_time,'%Y%m%d') &lt;= date_format(#{endTime},'%Y%m%d')
+            </if>
+        </where>
+    </select>
+
+    <select id="selectUserAiCallStatistics" parameterType="Long" resultType="map">
+        select
+            scene,
+            model,
+            count(*) as call_count,
+            sum(total_tokens) as total_tokens,
+            avg(response_time) as avg_response_time
+        from audit_ai_call_log
+        where user_id = #{userId}
+            and call_time &gt;= date_sub(now(), interval 30 day)
+        group by scene, model
+        order by call_count desc
+    </select>
+
+    <select id="selectSceneAiCallStatistics" parameterType="String" resultType="map">
+        select
+            date_format(call_time, '%Y-%m-%d') as call_date,
+            count(*) as call_count,
+            sum(total_tokens) as total_tokens,
+            avg(response_time) as avg_response_time
+        from audit_ai_call_log
+        where scene = #{scene}
+            and call_time &gt;= date_sub(now(), interval 30 day)
+        group by date_format(call_time, '%Y-%m-%d')
+        order by call_date desc
+    </select>
+
+    <select id="selectModelAiCallStatistics" parameterType="String" resultType="map">
+        select
+            scene,
+            count(*) as call_count,
+            sum(total_tokens) as total_tokens,
+            avg(response_time) as avg_response_time
+        from audit_ai_call_log
+        where model = #{model}
+            and call_time &gt;= date_sub(now(), interval 30 day)
+        group by scene
+        order by call_count desc
+    </select>
+
+    <select id="selectDailyTokenTrend" parameterType="map" resultType="map">
+        select
+            date_format(call_time, '%Y-%m-%d') as call_date,
+            sum(prompt_tokens) as prompt_tokens,
+            sum(completion_tokens) as completion_tokens,
+            sum(total_tokens) as total_tokens,
+            count(*) as call_count
+        from audit_ai_call_log
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="scene != null and scene != ''">
+                AND scene = #{scene}
+            </if>
+            <if test="model != null and model != ''">
+                AND model = #{model}
+            </if>
+            and call_time &gt;= date_sub(now(), interval 90 day)
+        </where>
+        group by date_format(call_time, '%Y-%m-%d')
+        order by call_date desc
+    </select>
+
+    <select id="selectCostStatistics" parameterType="map" resultType="map">
+        select
+            scene,
+            model,
+            count(*) as call_count,
+            sum(prompt_tokens) as total_prompt_tokens,
+            sum(completion_tokens) as total_completion_tokens,
+            sum(total_tokens) as total_tokens,
+            avg(response_time) as avg_response_time
+        from audit_ai_call_log
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="beginTime != null and beginTime != ''">
+                AND date_format(call_time,'%Y%m%d') &gt;= date_format(#{beginTime},'%Y%m%d')
+            </if>
+            <if test="endTime != null and endTime != ''">
+                AND date_format(call_time,'%Y%m%d') &lt;= date_format(#{endTime},'%Y%m%d')
+            </if>
+        </where>
+        group by scene, model
+        order by total_tokens desc
+    </select>
+
+    <delete id="cleanExpiredLogs">
+        delete from audit_ai_call_log
+        where call_time &lt; date_sub(now(), interval #{days} day)
+    </delete>
+
+    <!-- 查询每个模型的调用次数统计 -->
+    <select id="selectModelUsageStats" resultType="map">
+        select
+            model,
+            count(*) as call_count,
+            sum(total_tokens) as total_tokens,
+            sum(prompt_tokens) as total_prompt_tokens,
+            sum(completion_tokens) as total_completion_tokens,
+            avg(response_time) as avg_response_time,
+            max(call_time) as last_call_time
+        from audit_ai_call_log
+        where status = 1
+        group by model
+        order by call_count desc
+    </select>
+
+    <!-- 根据模型代码查询调用次数 -->
+    <select id="selectCallCountByModel" parameterType="string" resultType="int">
+        select count(*)
+        from audit_ai_call_log
+        where model = #{model}
+          and status = 1
+    </select>
+
+</mapper>
