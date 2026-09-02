@@ -99,12 +99,26 @@ def test_binance_rest_execution_client_places_market_order_with_signed_request()
 
             return Response()
 
+    class StubFilters:
+        """Keeps this test hermetic; filter behaviour is covered separately."""
+
+        def resolve_quantity(self, symbol, quantity, price):
+            from trade_runtime.execution.symbol_filters import QuantityDecision
+
+            # BTCUSDT trades on a 0.001 grid: 0.05384615 -> 0.053
+            snapped = int(quantity * 1000) / 1000
+            return QuantityDecision(snapped, True, "", snapped * price)
+
+        def format_quantity(self, symbol, quantity):
+            return f"{quantity:.3f}"
+
     client = BinanceRestExecutionClient(
         api_key="key-1",
         api_secret="secret-1",
         testnet=True,
         session=StubSession(),
         timestamp_supplier=lambda: 1713268800000,
+        symbol_filters=StubFilters(),
     )
     payload = client.place_market_order({"symbol": "BTCUSDT", "side": "BUY", "quote": 3500, "price": 65000})
 
@@ -114,7 +128,8 @@ def test_binance_rest_execution_client_places_market_order_with_signed_request()
     assert captured["kwargs"]["params"]["symbol"] == "BTCUSDT"
     assert captured["kwargs"]["params"]["side"] == "BUY"
     assert captured["kwargs"]["params"]["type"] == "MARKET"
-    assert captured["kwargs"]["params"]["quantity"] == "0.05384615"
+    # step-aligned, not the raw 0.05384615 the venue would have rejected
+    assert captured["kwargs"]["params"]["quantity"] == "0.053"
     assert captured["kwargs"]["params"]["timestamp"] == 1713268800000
     assert captured["kwargs"]["params"]["signature"]
     assert payload["orderId"] == 123456

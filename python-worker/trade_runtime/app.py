@@ -39,6 +39,7 @@ from trade_runtime.event_client import RuntimeEventClient
 from trade_runtime.execution.clients import BinanceRestExecutionClient
 from trade_runtime.execution.clients import OkxRestExecutionClient
 from trade_runtime.execution.order_sync import OkxOrderSyncService
+from trade_runtime.account_equity import AccountEquitySync
 from trade_runtime.execution.router import ExecutionRouter
 from trade_runtime.ingestion.binance_ws import BinanceWsMarketFeed
 from trade_runtime.ingestion.okx_ws import OkxWsMarketFeed
@@ -992,13 +993,41 @@ class TradeRuntimeApp:
         self.task_client = task_client
         self.replay_runner = replay_runner
         self.memory_consolidation_job = memory_consolidation_job
+        # Keeps accountEquity honest; see trade_runtime.account_equity for why the
+        # control plane would otherwise size positions off a 10000 USDT constant.
+        self.account_equity_sync = AccountEquitySync()
         self.sleep = sleep
         self._trigger_state_lock = threading.Lock()
+
+    def _sync_account_equity(self, run_once_kwargs: dict[str, Any], trace_id: str) -> None:
+        """Refresh equity from the venue before the graph sizes anything.
+
+        Without this the control plane keeps its 10000 USDT placeholder until a
+        fill produces the first pnl snapshot, and every position limit is a
+        fraction of a number nobody chose.
+        """
+        syncer = getattr(self, "account_equity_sync", None)
+        if syncer is None:
+            return
+        runtime_config = run_once_kwargs.get("runtime_config") or {}
+        mode = ""
+        if isinstance(runtime_config, dict):
+            mode = str(runtime_config.get("default_mode") or runtime_config.get("defaultMode") or "")
+        try:
+            syncer.sync(
+                execution_router=getattr(self.runner, "execution_router", None),
+                callback_client=getattr(self.runner, "callback_client", None),
+                mode=mode,
+                exchange=str(run_once_kwargs.get("exchange") or ""),
+                trace_id=trace_id,
+            )
+        except Exception as exc:
+            logger.warning("account equity sync raised error=%s", exc.__class__.__name__)
 
     def run_once(self) -> dict[str, Any]:
         """
         运行一次交易流程
-        
+
         Returns:
             dict[str, Any]: 运行结果
         """
@@ -1021,6 +1050,7 @@ class TradeRuntimeApp:
             run_once_kwargs.get("symbol"),
             run_once_kwargs.get("exchange"),
         )
+        self._sync_account_equity(run_once_kwargs, trace_id)
         result = self.runner.run_once(**run_once_kwargs)
         enriched_result = self._apply_position_guard(self.runner, self.current_runtime_context, run_once_kwargs, result)
         sync_result = self._sync_okx_order_history(

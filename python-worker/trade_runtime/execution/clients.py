@@ -6,11 +6,16 @@ import inspect
 import hashlib
 import hmac
 import json
+import logging
 from decimal import Decimal, ROUND_DOWN
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
 import requests
+
+from trade_runtime.execution.symbol_filters import shared_binance_filters
+
+logger = logging.getLogger(__name__)
 
 
 OKX_NOFX_ORDER_TAG = base64.b64decode("NGMzNjNjODFlZGM1QkNERQ==").decode("utf-8")
@@ -34,15 +39,70 @@ class BinanceRestExecutionClient:
         timeout: int = 10,
         session: Any | None = None,
         timestamp_supplier: Any | None = None,
+        symbol_filters: Any | None = None,
     ):
         self.api_key = api_key
         self.api_secret = api_secret
+        self.testnet = bool(testnet)
         self.base_url = "https://demo-fapi.binance.com" if testnet else "https://fapi.binance.com"
         self.timeout = timeout
         self.session = session or requests.Session()
         if hasattr(self.session, "headers"):
             self.session.headers.update({"X-MBX-APIKEY": api_key})
         self.timestamp_supplier = timestamp_supplier or (lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
+        # Venue filters (LOT_SIZE / MIN_NOTIONAL). Injected in tests; shared in
+        # production so one exchangeInfo snapshot serves every client.
+        self._symbol_filters = symbol_filters
+        self._leverage_applied: set[tuple[str, int]] = set()
+
+    @property
+    def symbol_filters(self) -> Any:
+        if self._symbol_filters is None:
+            self._symbol_filters = shared_binance_filters(testnet=self.testnet)
+        return self._symbol_filters
+
+    def set_leverage(self, symbol: str, leverage: Any) -> dict[str, Any]:
+        """Set leverage for a symbol.
+
+        Binance keeps leverage as account state, not an order parameter, so
+        without this call orders inherit whatever the account was last set to —
+        possibly 20x from a previous manual session. On a small account that is
+        the difference between a position the risk limits sized and one they
+        never sanctioned.
+        """
+        try:
+            leverage_int = int(float(leverage))
+        except (TypeError, ValueError):
+            raise ValueError("binance_invalid_leverage")
+        if leverage_int <= 0:
+            raise ValueError("binance_invalid_leverage")
+        normalized = str(symbol or "").strip().upper()
+        return self._request(
+            "POST",
+            "/fapi/v1/leverage",
+            params=self._signed_params({"symbol": normalized, "leverage": leverage_int}),
+        )
+
+    def _apply_leverage(self, order: dict[str, Any]) -> None:
+        requested = order.get("leverage")
+        if requested in (None, ""):
+            return
+        symbol = str(order.get("symbol") or "").strip().upper()
+        try:
+            leverage_int = int(float(requested))
+        except (TypeError, ValueError):
+            logger.warning("ignoring invalid leverage=%r symbol=%s", requested, symbol)
+            return
+        if leverage_int <= 0 or (symbol, leverage_int) in self._leverage_applied:
+            return
+        try:
+            self.set_leverage(symbol, leverage_int)
+        except Exception as exc:
+            # Never block the order on this: the account already has *some*
+            # leverage, and the risk gate has already bounded the notional.
+            logger.warning("set_leverage failed symbol=%s leverage=%s error=%s", symbol, leverage_int, exc)
+            return
+        self._leverage_applied.add((symbol, leverage_int))
 
     def _generate_signature(self, params: dict[str, Any]) -> str:
         query_string = "&".join(f"{key}={value}" for key, value in params.items())
@@ -78,12 +138,38 @@ class BinanceRestExecutionClient:
         return round(quote / price, 8) if price > 0 else 0.0
 
     def place_market_order(self, order: dict[str, Any]) -> dict[str, Any]:
+        symbol = str(order["symbol"]).strip().upper()
+        requested = self._calculate_quantity(order)
+        price = float(order.get("price", 0) or 0)
+
+        decision = self.symbol_filters.resolve_quantity(symbol, requested, price)
+        if decision.rejected:
+            # Refuse locally rather than trading an exchange error code for a
+            # reason. The caller records this as a skip with the cause intact.
+            logger.warning(
+                "order rejected by venue filters symbol=%s requested=%s reason=%s",
+                symbol,
+                requested,
+                decision.reason,
+            )
+            return {
+                "code": -4164,
+                "msg": f"local_filter_rejected:{decision.reason}",
+                "symbol": symbol,
+                "requestedQuantity": requested,
+                "adjustedQuantity": decision.quantity,
+                "notional": decision.notional,
+            }
+
+        self._apply_leverage(order)
         params = {
-            "symbol": order["symbol"],
+            "symbol": symbol,
             "side": order["side"],
             "type": "MARKET",
-            "quantity": f"{self._calculate_quantity(order):.8f}".rstrip("0").rstrip("."),
+            "quantity": self.symbol_filters.format_quantity(symbol, decision.quantity),
         }
+        if order.get("reduce_only") or order.get("reduceOnly"):
+            params["reduceOnly"] = "true"
         return self._request(
             "POST",
             "/fapi/v1/order",
@@ -96,6 +182,45 @@ class BinanceRestExecutionClient:
             "/fapi/v1/order",
             params=self._signed_params({"symbol": symbol, "orderId": order_id}),
         )
+
+    def get_balance(self) -> dict[str, Any]:
+        """Real USD-M futures equity.
+
+        Nothing previously asked the venue what the account was worth, so
+        position sizing ran on the control plane's 10000 USDT placeholder until
+        an execution produced the first pnl snapshot. On a small account that
+        placeholder is the difference between a sanely sized order and one
+        several hundred times too large.
+        """
+        payload = self._request(
+            "GET",
+            "/fapi/v2/account",
+            params=self._signed_params({}),
+        )
+        assets = payload.get("assets") if isinstance(payload, dict) else None
+        usdt: dict[str, Any] = {}
+        if isinstance(assets, list):
+            for item in assets:
+                if isinstance(item, dict) and str(item.get("asset") or "").upper() == "USDT":
+                    usdt = item
+                    break
+
+        def _f(source: dict[str, Any], key: str) -> float:
+            try:
+                return float(source.get(key) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # totalMarginBalance already includes unrealised PnL, which is the
+        # figure the risk limits are written against.
+        equity = _f(payload, "totalMarginBalance") or _f(payload, "totalWalletBalance")
+        return {
+            "total_equity": equity,
+            "available_balance": _f(payload, "availableBalance") or _f(usdt, "availableBalance"),
+            "total_unrealized_profit": _f(payload, "totalUnrealizedProfit"),
+            "wallet_balance": _f(payload, "totalWalletBalance"),
+            "currency": "USDT",
+        }
 
 
 class LegacyBinanceExecutionClient:
