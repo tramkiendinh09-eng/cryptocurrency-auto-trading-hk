@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from trade_runtime.memory.price_pattern import analyze_price_pattern
@@ -103,6 +103,34 @@ class TradeLifecycleClient:
         rows = payload.get("data") if isinstance(payload, dict) else payload
         return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
+    # application.yml pins Jackson to `yyyy-MM-dd HH:mm:ss` in GMT+8. isoformat()
+    # emits microseconds and a UTC offset, which Jackson rejects outright:
+    # "Cannot deserialize value of type java.util.Date ... not a valid
+    # representation". The write then fails with HTTP 200 and a 500 body, so
+    # nothing surfaced.
+    _BACKEND_TZ = timezone(timedelta(hours=8))
+
+    @classmethod
+    def _format_datetime(cls, value: datetime) -> str:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(cls._BACKEND_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _camel(key: str) -> str:
+        """snake_case -> camelCase，已是驼峰的键原样返回。
+
+        原实现是一张手写映射表，唯独漏了 trace_id，于是后端收到的载荷缺少
+        traceId 并返回 {"code":500,"msg":"traceId is required"}——而 RuoYi 的
+        业务错误走 HTTP 200，raise_for_status() 不会拦下，调用方拿到空 data
+        仍报告 "recorded"。整条生命周期/复盘链路因此从未落过一行数据。
+        改成通用转换，任何字段都不会再被遗漏。
+        """
+        if "_" not in key:
+            return key
+        head, *rest = key.split("_")
+        return head + "".join(part[:1].upper() + part[1:] for part in rest if part)
+
     def _to_camel_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """转换为驼峰命名"""
         camel_map = {
@@ -130,13 +158,13 @@ class TradeLifecycleClient:
         }
         result = {}
         for key, value in payload.items():
-            camel_key = camel_map.get(key, key)
+            camel_key = camel_map.get(key) or self._camel(key)
             if isinstance(value, dict):
                 value = json.dumps(value, ensure_ascii=False)
             elif isinstance(value, list):
                 value = json.dumps(value, ensure_ascii=False)
             elif isinstance(value, datetime):
-                value = value.isoformat()
+                value = self._format_datetime(value)
             result[camel_key] = value
         return result
 

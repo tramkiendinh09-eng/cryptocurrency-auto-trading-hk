@@ -279,3 +279,56 @@ def test_absent_or_invalid_leverage_stays_absent():
     assert _resolve_leverage({}, {"leverage_hint": 0}) is None
     assert _resolve_leverage({}, {"leverage_hint": -5}) is None
     assert _resolve_leverage({}, {"leverage_hint": "abc"}) is None
+
+
+# ── trade lifecycle payload contract ──────────────────────────────────────
+
+def test_lifecycle_payload_converts_every_snake_key():
+    """A hand-written map had omitted trace_id, so the backend rejected every
+    write with "traceId is required" — over HTTP 200, which raise_for_status()
+    lets through. The whole reflection loop silently persisted nothing."""
+    from trade_runtime.memory.trade_lifecycle import TradeLifecycleClient
+
+    client = TradeLifecycleClient(base_url="http://x", bearer_token="")
+    camel = client._to_camel_payload(
+        {
+            "trace_id": "t1",
+            "exchange_code": "binance",
+            "entry_price": 99.2,
+            "realized_pnl_pct": 1.5,
+            "symbol": "SOLUSDT",
+            "alreadyCamel": 1,
+        }
+    )
+    assert camel["traceId"] == "t1"
+    assert camel["exchangeCode"] == "binance"
+    assert camel["entryPrice"] == 99.2
+    assert camel["realizedPnlPct"] == 1.5
+    assert camel["symbol"] == "SOLUSDT"
+    assert camel["alreadyCamel"] == 1
+    assert not any("_" in key for key in camel)
+
+
+def test_lifecycle_datetime_matches_backend_jackson_format():
+    """application.yml pins Jackson to `yyyy-MM-dd HH:mm:ss` in GMT+8;
+    isoformat() produced microseconds plus an offset and Jackson refused it."""
+    from datetime import datetime, timezone
+
+    from trade_runtime.memory.trade_lifecycle import TradeLifecycleClient
+
+    client = TradeLifecycleClient(base_url="http://x", bearer_token="")
+    camel = client._to_camel_payload(
+        {"entry_time": datetime(2026, 9, 2, 16, 7, 2, 786398, tzinfo=timezone.utc)}
+    )
+    # UTC 16:07 -> GMT+8 00:07 the next day
+    assert camel["entryTime"] == "2026-09-03 00:07:02"
+
+
+def test_lifecycle_naive_datetime_is_treated_as_utc():
+    from datetime import datetime
+
+    from trade_runtime.memory.trade_lifecycle import TradeLifecycleClient
+
+    client = TradeLifecycleClient(base_url="http://x", bearer_token="")
+    camel = client._to_camel_payload({"exit_time": datetime(2026, 9, 2, 0, 0, 0)})
+    assert camel["exitTime"] == "2026-09-02 08:00:00"
