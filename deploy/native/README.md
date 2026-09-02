@@ -180,17 +180,28 @@ default-time-zone = '+08:00'
     "klineLimit": 500
   },
   "marketTrigger": {
-    "fundingRateAbs": 0.0005,
-    "markPriceDeviationPct": 0.25
+    "fundingRateAbs": 0.0,
+    "markPriceDeviationPct": 0.05
   }
 }
 ```
 
 `klineIntervals` 只取 1m 和 15m：`summarize_kline_context` 以 1m 为主序列推导 15m/60m/240m 窗口，另用 15m 序列算 60m 指标，默认那五个区间里有三个拉了没人用。`klineLimit` 需要 500——240m 量比要比较前后各 240 根 1m 线，默认的 120 会让这个「240 分钟窗口」实际只有 120 分钟且量比恒为 0。
 
-两个阈值的取值依据：本机实测 mark 与最新价偏离常态在 ±0.05% 以内，0.25% 是真正的价格脱节；资金费率基准约 0.01%/8h，0.05% 是文献中「多头拥挤」的下沿。
+这两个阈值**已经过 30 天历史校准**，详见 [CALIBRATION.md](CALIBRATION.md)。我最初按公开经验值取的 `fundingRateAbs: 0.0005` 和 `markPriceDeviationPct: 0.25` 都被证伪：
 
-**这些阈值没有经过回测。** 这个仓库没有任何历史回测设施（`replay` 只是把单条 `trace_id` 重放一遍，不是历史检验），所以全部触发阈值——包括原有的 `priceChangePct: 2.5`——都是人工选定值。上实盘前，把阈值放到历史数据上校准是比再加信号更有价值的下一步。
+- `markPriceDeviationPct: 0.25` 在 30 天里只触发 **4 次**，实际是死的（本机实测偏离 p99 = 0.033%，p99.9 = 0.069%）。改为 `0.05`，30 天触发 118 次。
+- `fundingRateAbs` 与触发器语义错配——资金费率是持续 8 小时的**水平量**而非事件，`abs(rate) >= threshold` 一旦成立就持续成立整个结算周期。任何能触发的取值都会每分钟触发（0.0001 → 384 次/天），而 0.0005 在窗口内**一次都没到过**（91 次结算的绝对值上限就是 0.0001）。已回退为 0（关闭），费率仍作为决策上下文进入 `feature_snapshot` 给到 LLM。
+
+校准同时表明：**没有任何行情维度在这段历史上有稳定的方向预测力**，包括原作者的 `priceChangePct`。这不是阈值没调好，而是触发策略的职责本就是分发门控而非方向预测——正确的评价口径是 LLM 预算频次，不是命中率。原作者的价格阈值因此未作改动（现行 1.20 次 LLM/天，上限 30 次/天）。
+
+校准设施在 `python-worker/trade_runtime/calibration/`，判定全部复用生产的 `evaluate_trigger_policy`，不复制任何阈值比较逻辑：
+
+```bash
+cd /opt/dca/src/python-worker && export PYTHONPATH=.
+# 读任何 hit_rate 之前先看方向基准率
+/opt/dca/venv/bin/python -m trade_runtime.calibration.cli describe --symbol BTCUSDT --days 30
+```
 
 ### 顺带修掉的一个隐性缺陷
 
