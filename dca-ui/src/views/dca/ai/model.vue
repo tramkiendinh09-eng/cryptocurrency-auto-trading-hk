@@ -170,8 +170,12 @@
             注意：API密钥将被加密存储
           </div>
         </el-form-item>
-        <el-form-item label="API版本" prop="apiVersion">
-          <el-input v-model="form.apiVersion" placeholder="请输入API版本（可选）" />
+        <el-form-item label="推理档位" prop="apiVersion">
+          <el-input v-model="form.apiVersion" placeholder="reasoning_effort，如 low / medium / high（留空则不发送）" />
+          <div class="mt-2 text-xs text-gray-500">
+            仅 OpenAI 兼容接口生效，按填写值原样作为 reasoning_effort 发送。
+            填写前请确认目标端点真正支持该档位——部分中转会静默忽略无法识别的取值。
+          </div>
         </el-form-item>
         <el-form-item label="模型版本" prop="modelVersion">
           <el-input v-model="form.modelVersion" placeholder="请输入模型版本（可选）" />

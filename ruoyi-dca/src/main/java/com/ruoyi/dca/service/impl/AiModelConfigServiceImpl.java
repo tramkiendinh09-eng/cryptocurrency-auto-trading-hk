@@ -1403,7 +1403,30 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService
 
         body.put("max_tokens", maxTokens);
         addSamplingParameters(body, config, !"anthropic".equals(provider));
+        addReasoningEffort(body, config);
         return body;
+    }
+
+    /**
+     * 为推理模型附加 reasoning_effort。
+     *
+     * 取值来自模型配置的 api_version 列（该列此前未被任何调用路径使用）。
+     * 只在非 anthropic / 非 ollama 的 OpenAI 兼容路径上附加，因为这个参数
+     * 是 OpenAI 系接口的约定。
+     *
+     * 注意：不校验取值。中转与厂商对不认识的档位处理方式不一致——实测某些
+     * 中转会静默忽略无效值而非报错（传 "xhigh" 与传 "high" 得到相同的
+     * reasoning_tokens），所以这里只负责如实转发，由运维在配置时确认目标
+     * 端点真正支持哪些档位。
+     */
+    private void addReasoningEffort(Map<String, Object> body, AiModelConfig config)
+    {
+        String effort = normalizeInput(config == null ? null : config.getApiVersion());
+        if (StringUtils.isEmpty(effort))
+        {
+            return;
+        }
+        body.put("reasoning_effort", effort);
     }
 
     private void addSamplingParameters(Map<String, Object> body, AiModelConfig config, boolean includeTopP)

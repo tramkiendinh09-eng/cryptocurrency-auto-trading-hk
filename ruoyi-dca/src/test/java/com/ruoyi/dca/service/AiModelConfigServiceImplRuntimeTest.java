@@ -280,6 +280,86 @@ class AiModelConfigServiceImplRuntimeTest {
         assertEquals("deepseek-reasoner", captor.getValue().getModelCode());
     }
 
+    @Test
+    void callAiModelForRuntimeSendsReasoningEffortWhenConfigured() {
+        AiModelConfigMapper aiModelConfigMapper = mock(AiModelConfigMapper.class);
+        AuditAiCallLogMapper auditAiCallLogMapper = mock(AuditAiCallLogMapper.class);
+        RestTemplate restTemplate = mock(RestTemplate.class);
+
+        AiModelConfig config = new AiModelConfig();
+        config.setId(41L);
+        config.setModelCode("grok-4.6");
+        config.setProvider("openai");
+        config.setApiKey("relay-key");
+        config.setApiEndpoint("https://relay.internal/v1/chat/completions");
+        config.setApiVersion("high");
+        config.setIsEnabled(1);
+
+        when(aiModelConfigMapper.selectAiModelConfigById(41L)).thenReturn(config);
+        when(restTemplate.exchange(
+            eq("https://relay.internal/v1/chat/completions"),
+            eq(HttpMethod.POST),
+            any(HttpEntity.class),
+            eq(String.class)
+        )).thenReturn(ResponseEntity.status(HttpStatus.OK).body("""
+            {"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}
+            """));
+        when(auditAiCallLogMapper.insertAuditAiCallLog(any(AuditAiCallLog.class))).thenReturn(1);
+
+        AiModelConfigServiceImpl service = createRuntimeService(aiModelConfigMapper, auditAiCallLogMapper, restTemplate);
+        service.callAiModelForRuntime(41L, "hi");
+
+        ArgumentCaptor<HttpEntity> captor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(
+            eq("https://relay.internal/v1/chat/completions"),
+            eq(HttpMethod.POST),
+            captor.capture(),
+            eq(String.class)
+        );
+        Object body = captor.getValue().getBody();
+        assertTrue(body instanceof java.util.Map);
+        assertEquals("high", ((java.util.Map<?, ?>) body).get("reasoning_effort"));
+    }
+
+    @Test
+    void callAiModelForRuntimeOmitsReasoningEffortWhenNotConfigured() {
+        AiModelConfigMapper aiModelConfigMapper = mock(AiModelConfigMapper.class);
+        AuditAiCallLogMapper auditAiCallLogMapper = mock(AuditAiCallLogMapper.class);
+        RestTemplate restTemplate = mock(RestTemplate.class);
+
+        AiModelConfig config = new AiModelConfig();
+        config.setId(42L);
+        config.setModelCode("gpt-4.1");
+        config.setProvider("openai");
+        config.setApiKey("k");
+        config.setApiEndpoint("https://api.openai.internal/v1/chat/completions");
+        config.setIsEnabled(1);
+
+        when(aiModelConfigMapper.selectAiModelConfigById(42L)).thenReturn(config);
+        when(restTemplate.exchange(
+            eq("https://api.openai.internal/v1/chat/completions"),
+            eq(HttpMethod.POST),
+            any(HttpEntity.class),
+            eq(String.class)
+        )).thenReturn(ResponseEntity.status(HttpStatus.OK).body("""
+            {"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":2}}
+            """));
+        when(auditAiCallLogMapper.insertAuditAiCallLog(any(AuditAiCallLog.class))).thenReturn(1);
+
+        AiModelConfigServiceImpl service = createRuntimeService(aiModelConfigMapper, auditAiCallLogMapper, restTemplate);
+        service.callAiModelForRuntime(42L, "hi");
+
+        ArgumentCaptor<HttpEntity> captor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(
+            eq("https://api.openai.internal/v1/chat/completions"),
+            eq(HttpMethod.POST),
+            captor.capture(),
+            eq(String.class)
+        );
+        // 未配置时不得出现该键——发一个空串或 null 会被某些端点判成非法值
+        assertTrue(!((java.util.Map<?, ?>) captor.getValue().getBody()).containsKey("reasoning_effort"));
+    }
+
     private AiModelConfigServiceImpl createRuntimeService(AiModelConfigMapper aiModelConfigMapper,
                                                           AuditAiCallLogMapper auditAiCallLogMapper,
                                                           RestTemplate runtimeRestTemplate) {
