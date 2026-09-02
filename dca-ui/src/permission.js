@@ -32,9 +32,13 @@ router.beforeEach((to, from, next) => {
     } else {
       if (useUserStore().roles.length === 0) {
         isRelogin.show = true
+        // The inner generateRoutes() promise must be returned. Without it a
+        // rejection there escapes this catch, next() is never called, and the
+        // navigation hangs forever — leaving RouteLoading's overlay up with no
+        // way out, which looks exactly like a frozen "Loading workspace" screen.
         useUserStore().getInfo().then(() => {
           isRelogin.show = false
-          usePermissionStore().generateRoutes().then(accessRoutes => {
+          return usePermissionStore().generateRoutes().then(accessRoutes => {
             accessRoutes.forEach(route => {
               if (!isHttp(route.path)) {
                 router.addRoute(route)
@@ -43,9 +47,14 @@ router.beforeEach((to, from, next) => {
             next({ ...to, replace: true })
           })
         }).catch(err => {
+          isRelogin.show = false
+          hideRouteLoading()
           useUserStore().logOut().then(() => {
             ElMessage.error(err)
-            next({ path: '/' })
+            next({ path: '/login' })
+          }).catch(() => {
+            // Even a failing logout must not strand the user on the overlay.
+            next({ path: '/login' })
           })
         })
       } else {

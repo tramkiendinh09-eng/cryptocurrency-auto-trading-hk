@@ -26,7 +26,11 @@ import { routeLoading } from '@/utils/routeLoading'
 .route-loading {
   position: fixed;
   inset: 0;
-  z-index: 3000;
+  // Element Plus allocates modal z-indexes from 2000 upwards. At 3000 this
+  // overlay sat on top of every dialog, so the "password is still the initial
+  // one" confirm raised during getInfo() rendered underneath a blurred veil —
+  // invisible, and with nothing on screen to dismiss it.
+  z-index: 1990;
   display: grid;
   place-items: center;
   pointer-events: none;

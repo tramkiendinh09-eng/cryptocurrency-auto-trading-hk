@@ -18,6 +18,7 @@ INSERT INTO sys_role (role_id,role_name,role_key,role_sort,data_scope,menu_check
 DELETE FROM sys_user;
 INSERT INTO sys_user (user_id,dept_id,user_name,nick_name,email,phonenumber,sex,avatar,password,status,del_flag,login_ip,login_date,create_by,create_time,remark) VALUES
   (1,100,'admin','管理员','','','0','','__ADMIN_PWD_HASH__','0','0','',NULL,'admin','2026-09-02 00:00:00','初始管理员');
+UPDATE sys_user SET pwd_update_date = '2026-09-02 00:00:00' WHERE user_id = 1;
 DELETE FROM sys_user_role;
 INSERT INTO sys_user_role (user_id,role_id) VALUES (1,1);
 
@@ -25,21 +26,22 @@ INSERT INTO sys_user_role (user_id,role_id) VALUES (1,1);
 DELETE FROM sys_menu;
 INSERT INTO sys_menu (menu_id,menu_name,parent_id,order_num,path,component,perms,menu_type,visible,icon,status,is_frame,create_by,create_time) VALUES
   (2000,'交易控制台',0,1,'trade',NULL,NULL,'M','0','monitor','0','0','admin','2026-09-02 00:00:00'),
-  (2001,'运行时监控',2000,1,'runtime','dca/trade/runtime/index','dca:tradeRuntime:query','C','0','dashboard','0','0','admin','2026-09-02 00:00:00'),
-  (2002,'策略管理',2000,2,'strategy','dca/trade/strategy/index','dca:tradeStrategy:list','C','0','tree','0','0','admin','2026-09-02 00:00:00'),
-  (2003,'决策审计',2000,3,'decision','dca/trade/decision/index','dca:audit:list','C','0','form','0','0','admin','2026-09-02 00:00:00'),
-  (2004,'订单管理',2000,4,'orders','dca/trade/orders/index','dca:tradeRuntime:query','C','0','list','0','0','admin','2026-09-02 00:00:00'),
-  (2005,'成交明细',2000,5,'fills','dca/trade/fills/index','dca:tradeRuntime:query','C','0','documentation','0','0','admin','2026-09-02 00:00:00'),
-  (2006,'持仓管理',2000,6,'positions','dca/trade/positions/index','dca:tradeRuntime:query','C','0','chart','0','0','admin','2026-09-02 00:00:00'),
-  (2007,'持仓守护',2000,7,'position-guard','dca/trade/positionGuard/index','dca:tradePositionGuard:list','C','0','shield','0','0','admin','2026-09-02 00:00:00'),
-  (2008,'风控命中',2000,8,'risk-hits','dca/trade/riskHits/index','dca:tradeRuntime:query','C','0','validCode','0','0','admin','2026-09-02 00:00:00'),
-  (2009,'决策回放',2000,9,'replay','dca/trade/replay/index','dca:tradeRuntime:query','C','0','redo','0','0','admin','2026-09-02 00:00:00'),
-  (2010,'链路审计',2000,10,'trace-audit','dca/trade/traceAudit/index','dca:audit:list','C','0','log','0','0','admin','2026-09-02 00:00:00'),
-  (2011,'交易账户',2000,11,'account','dca/trade/account/index','dca:tradeAccount:list','C','0','money','0','0','admin','2026-09-02 00:00:00'),
-  (2012,'Agent 档案',2000,12,'agent-profile','dca/trade/agentProfile/index','dca:tradeAgentProfile:list','C','0','peoples','0','0','admin','2026-09-02 00:00:00'),
-  (2013,'Prompt 绑定',2000,13,'prompt-binding','dca/trade/promptBinding/index','dca:tradePromptBinding:list','C','0','edit','0','0','admin','2026-09-02 00:00:00'),
-  (2014,'通知策略',2000,14,'notify-policy','dca/trade/notifyPolicy/index','dca:tradeNotifyPolicy:list','C','0','message','0','0','admin','2026-09-02 00:00:00'),
-  (2015,'通知模板',2000,15,'notify-template','dca/trade/notifyTemplate/index','dca:notifyTemplate:list','C','0','email','0','0','admin','2026-09-02 00:00:00'),
+  (2001,'实盘驾驶舱',2000,1,'monitor','dca/trade/monitor/index','dca:tradeRuntime:query','C','0','dashboard','0','0','admin','2026-09-02 00:00:00'),
+  (2002,'运行时监控',2000,2,'runtime','dca/trade/runtime/index','dca:tradeRuntime:query','C','0','monitor','0','0','admin','2026-09-02 00:00:00'),
+  (2003,'策略管理',2000,3,'strategy','dca/trade/strategy/index','dca:tradeStrategy:list','C','0','tree','0','0','admin','2026-09-02 00:00:00'),
+  (2004,'决策审计',2000,4,'decision','dca/trade/decision/index','dca:audit:list','C','0','form','0','0','admin','2026-09-02 00:00:00'),
+  (2005,'订单管理',2000,5,'orders','dca/trade/orders/index','dca:tradeRuntime:query','C','0','list','0','0','admin','2026-09-02 00:00:00'),
+  (2006,'成交明细',2000,6,'fills','dca/trade/fills/index','dca:tradeRuntime:query','C','0','documentation','0','0','admin','2026-09-02 00:00:00'),
+  (2007,'持仓管理',2000,7,'positions','dca/trade/positions/index','dca:tradeRuntime:query','C','0','chart','0','0','admin','2026-09-02 00:00:00'),
+  (2008,'持仓守护',2000,8,'position-guard','dca/trade/positionGuard/index','dca:tradePositionGuard:list','C','0','shield','0','0','admin','2026-09-02 00:00:00'),
+  (2009,'风控命中',2000,9,'risk-hits','dca/trade/riskHits/index','dca:tradeRuntime:query','C','0','validCode','0','0','admin','2026-09-02 00:00:00'),
+  (2010,'决策回放',2000,10,'replay','dca/trade/replay/index','dca:tradeRuntime:query','C','0','redo','0','0','admin','2026-09-02 00:00:00'),
+  (2011,'链路审计',2000,11,'trace-audit','dca/trade/traceAudit/index','dca:audit:list','C','0','log','0','0','admin','2026-09-02 00:00:00'),
+  (2012,'交易账户',2000,12,'account','dca/trade/account/index','dca:tradeAccount:list','C','0','money','0','0','admin','2026-09-02 00:00:00'),
+  (2013,'Agent 档案',2000,13,'agent-profile','dca/trade/agentProfile/index','dca:tradeAgentProfile:list','C','0','peoples','0','0','admin','2026-09-02 00:00:00'),
+  (2014,'Prompt 绑定',2000,14,'prompt-binding','dca/trade/promptBinding/index','dca:tradePromptBinding:list','C','0','edit','0','0','admin','2026-09-02 00:00:00'),
+  (2015,'通知策略',2000,15,'notify-policy','dca/trade/notifyPolicy/index','dca:tradeNotifyPolicy:list','C','0','message','0','0','admin','2026-09-02 00:00:00'),
+  (2016,'通知模板',2000,16,'notify-template','dca/trade/notifyTemplate/index','dca:notifyTemplate:list','C','0','email','0','0','admin','2026-09-02 00:00:00'),
   (2100,'数据与模型',0,2,'data',NULL,NULL,'M','0','chart','0','0','admin','2026-09-02 00:00:00'),
   (2101,'行情数据',2100,1,'market','dca/market/index','dca:market:query','C','0','international','0','0','admin','2026-09-02 00:00:00'),
   (2102,'AI 模型',2100,2,'ai-model','dca/ai/index','dca:aiModel:list','C','0','component','0','0','admin','2026-09-02 00:00:00'),
@@ -209,6 +211,20 @@ INSERT INTO market_api_config (id,config_name,data_category,api_name,api_url,htt
   (102,'新闻资讯','news','新闻资讯','http://127.0.0.1:18080/runtime/news','GET','http','feed-adapter','futures',1,2,10,2,5,1,0,'admin','2026-09-02 00:00:00','feed-adapter 聚合源'),
   (103,'链上资金','onchain','链上资金','http://127.0.0.1:18080/runtime/onchain','GET','http','feed-adapter','futures',1,3,10,2,5,1,0,'admin','2026-09-02 00:00:00','feed-adapter 聚合源'),
   (104,'社交舆情','social','社交舆情','http://127.0.0.1:18080/runtime/social','GET','http','feed-adapter','futures',1,4,10,2,5,1,0,'admin','2026-09-02 00:00:00','feed-adapter 聚合源');
+
+-- ---------- price source (Binance USD-M futures websocket) ----------
+-- selectFirstEnabledApi("PRICE") drives bootstrap.marketApiConfig; without a
+-- PRICE row the worker reports market_source_abnormal and market_data stays empty.
+-- The ws_* values match BinanceWebSocketProfile's built-in defaults.
+INSERT INTO market_api_config (id,config_name,data_category,data_sub_type,api_name,api_url,http_method,transport_type,vendor_code,market_scope,ws_base_url,ws_path,ws_stream_name_template,ws_combined_enabled,ws_symbol_lowercase,ws_ping_interval_seconds,ws_pong_timeout_seconds,ws_connection_ttl_hours,ws_max_streams_per_connection,ws_control_messages_per_second,doc_reference_url,enabled,priority,timeout,retry_count,retry_interval,version_no,use_proxy,apply_symbols,create_by,create_time,remark) VALUES
+  (101,'Binance 合约行情','PRICE','ticker','binance-futures-ticker','https://fapi.binance.com/fapi/v1/ticker/24hr','GET','ws','binance','futures','wss://fstream.binance.com','/ws','{symbol_lower}@ticker',0,1,20,60,24,1024,5,'https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams',1,1,10,2,5,1,0,'["BTCUSDT","ETHUSDT","SOLUSDT"]','admin','2026-09-02 00:00:00','香港出口实测可直连 fapi/fstream');
+
+-- ---------- collection config ----------
+DELETE FROM market_data_config;
+INSERT INTO market_data_config (id,config_name,symbol,data_sources,collect_interval,collect_kline,kline_periods,collect_fear_greed,collect_onchain,enabled,create_by,create_time,remark) VALUES
+  (1,'BTCUSDT 行情采集','BTCUSDT','["binance"]',60,1,'["15m","1h","4h"]',0,0,1,'admin','2026-09-02 00:00:00',NULL),
+  (2,'ETHUSDT 行情采集','ETHUSDT','["binance"]',60,1,'["15m","1h","4h"]',0,0,1,'admin','2026-09-02 00:00:00',NULL),
+  (3,'SOLUSDT 行情采集','SOLUSDT','["binance"]',60,1,'["15m","1h","4h"]',0,0,1,'admin','2026-09-02 00:00:00',NULL);
 
 -- ---------- notification plumbing ----------
 DELETE FROM notify_channel;
