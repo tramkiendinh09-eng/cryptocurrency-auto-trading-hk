@@ -1,0 +1,40 @@
+[Unit]
+Description=DCA decision runtime worker (LangGraph)
+After=network-online.target dca-backend.service dca-feed-adapter.service redis-server.service
+Wants=network-online.target
+Requires=dca-backend.service
+
+[Service]
+Type=simple
+User=dca
+Group=dca
+WorkingDirectory=/opt/dca/app/python-worker
+EnvironmentFile=/opt/dca/env/worker.env
+ExecStart=/opt/dca/venv/bin/python main.py
+Restart=always
+RestartSec=15s
+
+# The worker is the only component that can place orders. If it dies repeatedly,
+# stop restarting it rather than hammering the exchange with a broken build.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+MemoryMax=768M
+TasksMax=256
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dca/logs
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=append:/opt/dca/logs/worker.log
+StandardError=append:/opt/dca/logs/worker.log
+
+[Install]
+WantedBy=multi-user.target

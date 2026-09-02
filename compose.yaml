@@ -1,49 +1,129 @@
+# Self-contained stack, buildable from a clean checkout:
+#
+#   cp deploy/docker/.env.example .env   # then fill in the passwords
+#   docker compose up -d --build
+#
+# What changed from the version this replaces:
+#   * build contexts pointed at ./frontend and ./backend, which do not exist at
+#     the repository root — nothing could build.
+#   * there were no mysql or redis services at all, so the backend came up with
+#     nowhere to connect.
+#   * the schema is loaded automatically from sql/ on first start.
+#
+# Only the console port is published, and only on loopback.
+
+name: dca
+
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: dca-mysql
+    restart: unless-stopped
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+      --innodb-buffer-pool-size=256M
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ai_trading
+      MYSQL_USER: ${MYSQL_USER:-dca}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # *.sql here runs once, in filename order, on an empty data directory.
+      - ./sql/ruoyi_boot_min.sql:/docker-entrypoint-initdb.d/01-ruoyi.sql:ro
+      - ./sql/trade_runtime_boot_min.sql:/docker-entrypoint-initdb.d/02-trade.sql:ro
+      - ./sql/seed_min.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: dca-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dca-backend:
+    build:
+      context: .
+      dockerfile: deploy/docker/backend.Dockerfile
+    container_name: dca-backend
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_OPTS: -Xms256m -Xmx1024m -XX:+UseSerialGC
+      SERVER_PORT: 8080
+      RUOYI_PROFILE: /data/upload
+      LOG_PATH: /app/logs
+      LOG_LEVEL_RUOYI: info
+      MYSQL_URL: jdbc:mysql://mysql:3306/ai_trading?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=GMT%2B8
+      MYSQL_USERNAME: ${MYSQL_USER:-dca}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # application.yml ships the literal default "abcdefghijklmnopqrstuvwxyz";
+      # anyone who knows it can forge an admin token.
+      TOKEN_SECRET: ${TOKEN_SECRET:?set TOKEN_SECRET in .env}
+      DRUID_USERNAME: ${DRUID_USERNAME:-dca-ops}
+      DRUID_PASSWORD: ${DRUID_PASSWORD:?set DRUID_PASSWORD in .env}
+    volumes:
+      - ./data/upload:/data/upload
+      - backend-logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/dca/callback/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
   dca-frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
     container_name: dca-frontend
     restart: unless-stopped
     ports:
       - "127.0.0.1:28080:5174"
     environment:
       TZ: Asia/Shanghai
-
-  dca-backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: dca-backend
-    restart: unless-stopped
-    env_file:
-      - ./backend/.env
-    ports:
-      - "127.0.0.1:28081:8080"
-    volumes:
-      - ./data/upload:/data/upload
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      TZ: Asia/Shanghai
-      JAVA_OPTS: -Xms512m -Xmx1024m
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/dca/callback/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    depends_on:
+      - dca-backend
 
   feed-adapter:
     build:
-      context: ./feed-adapter
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: deploy/docker/feed-adapter.Dockerfile
     container_name: dca-feed-adapter
     restart: unless-stopped
-    env_file:
-      - ./feed-adapter/.env
     environment:
       TZ: Asia/Shanghai
+      FEED_ADAPTER_HOST: 0.0.0.0
+      FEED_ADAPTER_PORT: 18080
+      FEED_ADAPTER_NEWS_MIN_REFRESH_SECONDS: 180
+      FEED_ADAPTER_ONCHAIN_MIN_REFRESH_SECONDS: 300
+      FEED_ADAPTER_SOCIAL_MIN_REFRESH_SECONDS: 300
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/health', timeout=3)"]
       interval: 30s
@@ -53,21 +133,32 @@ services:
 
   python-worker:
     build:
-      context: ./python-worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: deploy/docker/python-worker.Dockerfile
     container_name: dca-python-worker
     restart: unless-stopped
-    env_file:
-      - ./python-worker/.env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       WORKER_PROFILE: trade_runtime
       TRADE_RUNTIME_RUN_MODE: forever
       TRADE_RUNTIME_BASE_URL: http://dca-backend:8080
+      BACKEND_API_URL: http://dca-backend:8080
+      TRADE_RUNTIME_DEFAULT_SYMBOL: BTCUSDT
+      TRADE_RUNTIME_POLL_INTERVAL_SECONDS: 15
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TRADE_RUNTIME_REDIS_HOST: redis
+      TRADE_RUNTIME_REDIS_PORT: 6379
+      TRADE_RUNTIME_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TRADE_RUNTIME_STREAM_NAME: trade.runtime.events
     depends_on:
       dca-backend:
         condition: service_healthy
       feed-adapter:
         condition: service_healthy
+
+volumes:
+  mysql-data:
+  redis-data:
+  backend-logs:

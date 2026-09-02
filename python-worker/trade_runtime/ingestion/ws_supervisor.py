@@ -17,12 +17,19 @@ class MarketWebSocketSupervisor:
         base_backoff_seconds: float = 1.0,
         max_backoff_seconds: float = 8.0,
         reconnect_attempts: int = 1,
+        rest_primary: bool = False,
         time_fn: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ):
         self.source_name = source_name
         self.client_factory = client_factory
         self.rest_payload_supplier = rest_payload_supplier
+        # When the configured transport is REST, polling is the intended source
+        # rather than a symptom of a broken socket. Without this the supervisor
+        # reports "degraded" on every fetch, and risk/guard.py treats degraded as
+        # an abnormal market source and blocks every order — so a network that
+        # cannot carry the websocket silently disables trading altogether.
+        self.rest_primary = bool(rest_primary)
         self.stale_after_seconds = stale_after_seconds
         self.heartbeat_timeout_seconds = heartbeat_timeout_seconds
         self.connection_ttl_seconds = connection_ttl_seconds
@@ -115,7 +122,32 @@ class MarketWebSocketSupervisor:
             payload = dict(self.last_payload_by_symbol.get(symbol) or {})
         return self._annotate_payload(payload, source_status)
 
+    def _fetch_rest_primary(self, symbol: str) -> dict[str, Any]:
+        """Poll REST as the configured transport.
+
+        Reports "ready" only when the poll actually returned data; a failing REST
+        source is still degraded, so the risk gate keeps its safety property.
+        """
+        if self.rest_payload_supplier is None:
+            return self._annotate_payload({}, "degraded")
+        try:
+            payload = self.rest_payload_supplier(symbol)
+        except Exception as exc:
+            self.last_error = str(exc)
+            return self._annotate_payload(
+                dict(self.last_payload_by_symbol.get(symbol) or {}), "degraded"
+            )
+        if isinstance(payload, dict) and payload:
+            self.last_message_at = self.time_fn()
+            self.last_payload_by_symbol[symbol] = dict(payload)
+            return self._annotate_payload(payload, "ready")
+        return self._annotate_payload(
+            dict(self.last_payload_by_symbol.get(symbol) or {}), "degraded"
+        )
+
     def fetch(self, symbol: str) -> dict[str, Any]:
+        if self.rest_primary:
+            return self._fetch_rest_primary(symbol)
         attempts = 0
         next_failure_count = self.reconnect_count + 1
         final_status = "degraded"

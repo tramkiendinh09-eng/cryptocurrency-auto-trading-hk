@@ -1,0 +1,130 @@
+# 原生部署（不使用 Docker）
+
+面向单机、与其他服务共存的部署。MySQL / Redis / nginx 走 apt，三个应用进程走 systemd。
+
+## 为什么另开一条路径
+
+仓库原有的部署路径只有 Docker，而它开箱跑不起来。落地过程中实际踩到并已修复的问题：
+
+| 问题 | 后果 | 处理 |
+| --- | --- | --- |
+| 建表脚本完全缺失。`.gitignore` 排除 `sql/ai_trading.sql`，`deploy/prod/README.md` 声称保留的 `ruoyi_boot_min.sql` / `trade_runtime_boot_min.sql` 从未提交 | 后端无法启动 | 从 MyBatis mapper + Java 实体反向重建 77 张表 / 1032 列，见 `sql/` |
+| 根目录 `compose.yaml` 的 build context 指向 `./frontend`、`./backend`，仓库根本没有这些目录 | `docker compose up --build` 直接失败 | 改为从源码多阶段构建，见 `deploy/docker/` |
+| compose 里没有 mysql 和 redis | 后端起来也没有库可连 | 补齐，并挂载 `sql/` 做首次自动初始化 |
+| `deploy/prod/python-worker/Dockerfile` 里 `COPY core ./core`、`COPY modules ./modules`，这两个目录不存在 | 镜像构建失败 | `deploy/docker/python-worker.Dockerfile` 只拷贝真实存在的 `main.py` 和 `trade_runtime/` |
+| `logback.xml` 把日志路径写死为 `/home/ruoyi/logs` | appender 创建失败 = 启动即崩，任何未预建该目录的机器都中招 | 改为可用 `LOG_PATH` 覆盖 |
+| `dca-ui/package.json` 的 `build:prod` 是 `-ui   build`（疑似批量替换事故） | README 让你执行的构建命令必然失败 | 修正为 `vite build --mode production` |
+| README 第 6 节让你跑 `deploy/compose.yaml` | 该文件不存在 | 用根目录 `compose.yaml` 或本目录的原生路径 |
+
+## 快速开始
+
+```bash
+sudo ./deploy/native/install.sh bootstrap   # 建用户/目录/env 模板、装 systemd 与 nginx
+# 编辑 /opt/dca/env/*.env，填掉所有 __CHANGE_ME__
+sudo ./deploy/native/install.sh schema      # 仅对空库执行；会 DROP TABLE
+./deploy/native/install.sh build            # 构建 jar 与前端产物
+sudo ./deploy/native/install.sh deploy      # 安装产物并拉起服务
+sudo ./deploy/native/install.sh status
+```
+
+`schema` 会拒绝在已有表的库上执行——这些脚本带 `DROP TABLE`，误跑会抹掉订单与审计历史。
+
+## 端口
+
+| 组件 | 监听 | 对外 |
+| --- | --- | --- |
+| 控制台 nginx | `0.0.0.0:8099` | 是（唯一入口） |
+| 后端 | `127.0.0.1:18081` | 否 |
+| feed-adapter | `127.0.0.1:18080` | 否 |
+| MySQL / Redis | `127.0.0.1` | 否 |
+
+## 安全：worker 的私有控制通道
+
+`/dca/` 下有 **43 个端点带 `@Anonymous`**，因为 worker 与后端的协议假定二者同处可信网络。这个假设本身没错，但它要求后端永不直接对外，且反向代理不能把这些路由透出去。
+
+危害最大的几个：
+
+- `GET /dca/ai/models/config/default`、`/config/{id}` —— **免鉴权返回解密后的明文模型 API Key**
+- `POST /dca/trade/runtime/model-call` —— 免鉴权的 LLM 调用，等于把你的额度做成公共代理
+- `POST /dca/event/ingest` —— 直接向决策图注入行情/新闻/链上/社交事件
+- `POST /dca/taskqueue/{pull,result,heartbeat}` —— 冒充 worker 接管任务
+- `POST /dca/trade/execution/*`、`/dca/callback/*` —— 免鉴权写入订单、成交、持仓与告警
+
+`nginx-dca.conf` 逐条封堵了这些路由，并且每一条都先比对过 `dca-ui` 的 API 层，确认控制台不会用到。有几个是控制台确实要用的只读接口，故意保留：`/dca/trade/runtime/config`、`/dca/decision/runs`、`/dca/trade/replay/source`、`/dca/trade/constants/*`。
+
+注意 `event`/`events`、`session`/`sessions` 只差一个字母，因此这两组必须用 `location =` 精确匹配，用前缀匹配会连带打死回放控制台。
+
+其余加固项：
+
+- 所有密钥只存在于 `/opt/dca/env/*.env`（0600），仓库内不落任何凭据
+- `TOKEN_SECRET` 必须覆盖：`application.yml` 的默认值是字面量 `abcdefghijklmnopqrstuvwxyz`，知道它就能签发管理员 token
+- Druid 控制台（`statViewServlet` 默认启用且 allow 列表为空）与 OpenAPI 路由在 nginx 层 404，需要时走 SSH 隧道到 `127.0.0.1:18081`
+- `LOG_LEVEL_RUOYI` 默认 `debug` 会把每条 SQL（含订单流）写进日志，生产改 `info`
+- systemd 单元启用 `ProtectSystem=strict` / `NoNewPrivileges` / `PrivateTmp`，并设 `MemoryMax`
+- worker 单元设了 `StartLimitBurst=5`：下单通路反复崩溃时停止重启，而不是拿坏版本反复冲击交易所
+
+## 香港网络适配
+
+这台机的实测结论（其他机房未必相同，建议自测）：
+
+| 目标 | 结果 |
+| --- | --- |
+| `fapi.binance.com` REST | 通，约 180ms |
+| `www.okx.com` REST | 通 |
+| `stream.binance.com:9443` 现货 WS | 通，1 秒内有数据 |
+| **`fstream.binance.com` 合约 WS** | **TLS 握手成功，但 30 秒零数据帧** |
+| `api.openai.com` | 403 `unsupported_country_region_territory` |
+| `api.anthropic.com` | 403 forbidden |
+| `api.deepseek.com` | 401（通，仅缺 key） |
+
+两点由此决定：
+
+**LLM 走 DeepSeek。** worker 本身不直连任何模型厂商——它 POST 到后端的 `/dca/trade/runtime/model-call`，由 Java 侧按 `ai_model_config.api_endpoint` 发起请求。所以换模型只是改一行配置，种子默认就是 `deepseek-reasoner`。这条间接层正是被地区封锁的机器仍能跑决策图的原因。
+
+**行情源用 REST 而非 WS。** 合约 WS 握手能成但永不推数据，`ws_supervisor` 会把每次 fetch 判为失败、回退 REST 并标记 `degraded`；而 `risk/guard.py` 把 `degraded` 视为数据源异常 **拦掉每一笔下单**——网络问题会静默地把交易整个关停。
+
+因此给 supervisor 加了 `rest_primary`：当 `market_api_config.transport_type` 为 `http`/`rest` 时，轮询就是既定传输方式，取到数据即报 `ready`。安全性保留——REST 自己失败时仍然是 `degraded`。
+
+本机对应的配置：
+
+```sql
+UPDATE market_api_config SET transport_type='http' WHERE id=101;
+```
+
+`sql/seed_min.sql` 里仍默认 `ws`，因为多数网络下 WS 是更好的选择（延迟更低，触发判定更细）。REST 轮询按 `collect_interval` 取数，触发时效性会粗一些。
+
+## 时区
+
+应用以 GMT+8 写时间戳（JDBC `serverTimezone=GMT+8`，Jackson 同）。MySQL 若停留在 UTC，`NOW()` 会与每一条 `created_at` 相差 8 小时，任何基于 `NOW()` 的保留期查询都会算错（例如 `MarketDataCollectLogMapper.cleanOldLogs`）。交易域的清理走 Java 传入的 `#{cutoffTime}`，不受影响。
+
+安装脚本不会替你改共享实例的全局配置。若该 MySQL 只服务本项目：
+
+```ini
+# /etc/mysql/mysql.conf.d/zz-dca.cnf
+[mysqld]
+default-time-zone = '+08:00'
+```
+
+## 依赖瘦身
+
+`python-worker/requirements.txt` 从 12 个包减到 6 个。以下均经核实在整个 `python-worker/` 下没有任何 import：
+
+- `openai`、`anthropic` —— worker 从不直连模型厂商（见上）
+- `langchain` —— 只用到 `langgraph.graph`，langgraph 自带所需的 langchain-core
+- `binance-connector` —— `execution/` 用 `requests` 直接打 REST
+- `pyyaml`、`python-dotenv` —— 配置全部来自环境变量
+
+装完跑 `pytest tests/`：543 通过。（另有 2 个失败是 `test_sql_prompt_rendering.py` 找不到同样被 gitignore 掉的 `sql/ai_trading_online.sql`，与本次改动无关。）
+
+## schema 是怎么重建的
+
+原始 dump 不在仓库里，重建依据是树里仅存的三类权威信息：
+
+1. **MyBatis resultMap** —— 列与属性的对应，`<id>` 标记主键
+2. **Java 实体字段** —— 属性到 Java 类型，再映射到 MySQL 类型
+3. **insert 的列表与值列表按位置配对** —— 补出 resultMap 里没有的列，`#{property}` 回查 `parameterType` 得到类型
+4. **where / order by 的使用频次** —— 生成索引候选
+
+字段长度与精度是推断值（`BigDecimal` 统一给 `decimal(36,18)`，字符串按列名尾词判断 varchar/text），只有仓库自带契约测试和 `sql/migrations/` 里写死的类型是确定的。表结构与列名是精确的；类型足够跑通，但不保证与作者原始 dump 逐字节一致。
+
+验证方式：后端正常启动、admin 登录、菜单树渲染、12 个交易域接口全部 200，以及 worker 持续向 `decision_run` / `signal_event` / `event_raw` / `market_event` 写入——读写两侧都过了。

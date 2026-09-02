@@ -427,6 +427,24 @@ class BinanceMarketWebSocketClient:
         self.pending_market_events_by_symbol = {}
 
 
+def _rest_transport_configured(market_api_config: Any | None) -> bool:
+    """True when market_api_config.transport_type asks for REST polling.
+
+    Some networks complete the TLS handshake to fstream.binance.com but never
+    deliver a frame, so the socket looks alive while no data arrives. Setting
+    transport_type to http/rest makes REST the declared source instead of
+    letting every fetch look like a websocket failure.
+    """
+    if market_api_config is None:
+        return False
+    transport = str(
+        getattr(market_api_config, "transport_type", None)
+        or getattr(market_api_config, "transportType", None)
+        or ""
+    ).strip().lower()
+    return transport in {"http", "https", "rest", "poll", "polling"}
+
+
 class BinanceWsMarketFeed:
     def __init__(
         self,
@@ -453,6 +471,7 @@ class BinanceWsMarketFeed:
             heartbeat_timeout_seconds=float(profile.pong_timeout_seconds),
             connection_ttl_seconds=profile.connection_ttl_seconds,
             reconnect_attempts=profile.reconnect_attempts,
+            rest_primary=_rest_transport_configured(market_api_config),
         )
 
     def fetch(self, symbol: str) -> dict[str, Any]:

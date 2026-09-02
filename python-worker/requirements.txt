@@ -1,12 +1,21 @@
+# Runtime dependencies actually imported by trade_runtime.
+#
+# Removed as unused (verified: no import of them exists anywhere under
+# python-worker/, including the frozen legacy modules):
+#   openai, anthropic     - the worker never calls a model vendor directly. It
+#                           POSTs to the control plane's /dca/trade/runtime/
+#                           model-call, and the Java side dials the endpoint
+#                           stored in ai_model_config. That indirection is what
+#                           lets a geo-blocked host still run the decision graph.
+#   langchain             - only `from langgraph.graph import ...` is used;
+#                           langgraph pulls the langchain-core it needs itself.
+#   binance-connector     - execution/ talks to the REST API over `requests`.
+#   pyyaml, python-dotenv - never imported; configuration arrives as env vars.
 requests==2.31.0
 redis==5.0.1
-python-dotenv==1.0.0
 websocket-client==1.6.4
-binance-connector==3.6.0
-openai==1.7.2
-anthropic==0.18.0
-pyyaml==6.0.1
-langchain==0.3.3
-langgraph==0.2.35
 pydantic==2.9.2
+langgraph==0.2.35
+
+# dev only
 pytest==8.3.3

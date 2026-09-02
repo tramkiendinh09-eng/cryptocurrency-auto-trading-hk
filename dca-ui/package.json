@@ -9,7 +9,7 @@
     "dev": "vite",
     "test:unit": "vitest run",
     "build": "vite build",
-    "build:prod": "-ui   build",
+    "build:prod": "vite build --mode production",
     "build:stage": "vite build --mode staging",
     "preview": "vite preview"
   },

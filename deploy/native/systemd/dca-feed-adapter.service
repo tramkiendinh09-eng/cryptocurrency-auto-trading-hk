@@ -1,0 +1,34 @@
+[Unit]
+Description=DCA auxiliary feed adapter (news / onchain / social)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dca
+Group=dca
+WorkingDirectory=/opt/dca/app/feed-adapter
+EnvironmentFile=/opt/dca/env/feed-adapter.env
+ExecStart=/opt/dca/venv/bin/python app.py
+Restart=always
+RestartSec=10s
+
+MemoryMax=384M
+TasksMax=128
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dca/logs
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=append:/opt/dca/logs/feed-adapter.log
+StandardError=append:/opt/dca/logs/feed-adapter.log
+
+[Install]
+WantedBy=multi-user.target

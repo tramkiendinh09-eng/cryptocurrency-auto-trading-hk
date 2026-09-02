@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <!-- 日志存放路径 -->
-	<property name="log.path" value="/home/ruoyi/logs" />
+    <!-- 日志存放路径：可用 LOG_PATH 环境变量或 -Dlog.path 覆盖。
+         写死绝对路径会让进程在任何未预先建好 /home/ruoyi 的机器上启动即失败
+         （logback 把 appender 建立失败视为致命错误）。 -->
+	<property name="log.path" value="${LOG_PATH:-${log.path:-/home/ruoyi/logs}}" />
     <!-- 日志输出格式 -->
 	<property name="log.pattern" value="%d{HH:mm:ss.SSS} [%thread] %-5level %logger{20} - [%method,%line] - %msg%n" />
 

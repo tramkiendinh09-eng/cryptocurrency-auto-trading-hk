@@ -1,0 +1,41 @@
+[Unit]
+Description=DCA trading control plane (Spring Boot)
+Documentation=https://github.com/Y081/cryptocurrency-auto-trading
+After=network-online.target mysql.service redis-server.service
+Wants=network-online.target
+Requires=mysql.service redis-server.service
+
+[Service]
+Type=simple
+User=dca
+Group=dca
+WorkingDirectory=/opt/dca/app/backend
+EnvironmentFile=/opt/dca/env/backend.env
+ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/dca/app/backend/app.jar
+Restart=always
+RestartSec=10s
+TimeoutStopSec=30s
+SuccessExitStatus=143
+
+# The control plane is reachable only through nginx; nothing here listens publicly.
+# Keep the heap small enough that the box still hosts its other services.
+MemoryMax=2G
+MemoryHigh=1700M
+TasksMax=512
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dca/data /opt/dca/logs
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=append:/opt/dca/logs/backend.log
+StandardError=append:/opt/dca/logs/backend.log
+
+[Install]
+WantedBy=multi-user.target

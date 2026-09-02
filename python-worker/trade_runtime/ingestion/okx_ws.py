@@ -338,6 +338,23 @@ class OkxMarketWebSocketClient:
         self.pending_market_events_by_symbol = {}
 
 
+def _rest_transport_configured(market_api_config: Any | None) -> bool:
+    """True when market_api_config.transport_type asks for REST polling.
+
+    Mirrors binance_ws._rest_transport_configured: declaring http/rest makes
+    polling the intended source, so the supervisor stops reporting "degraded"
+    (which risk/guard.py reads as an abnormal source and blocks orders on).
+    """
+    if market_api_config is None:
+        return False
+    transport = str(
+        getattr(market_api_config, "transport_type", None)
+        or getattr(market_api_config, "transportType", None)
+        or ""
+    ).strip().lower()
+    return transport in {"http", "https", "rest", "poll", "polling"}
+
+
 class OkxWsMarketFeed:
     def __init__(
         self,
@@ -364,6 +381,7 @@ class OkxWsMarketFeed:
             heartbeat_timeout_seconds=float(profile.pong_timeout_seconds),
             connection_ttl_seconds=profile.connection_ttl_seconds,
             reconnect_attempts=profile.reconnect_attempts,
+            rest_primary=_rest_transport_configured(market_api_config),
         )
 
     def fetch(self, symbol: str) -> dict[str, Any]:
