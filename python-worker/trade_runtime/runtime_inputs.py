@@ -9,6 +9,7 @@ import requests
 from trade_runtime.features.classifier import EventStrengthClassifier
 from trade_runtime.features.snapshot_builder import FeatureSnapshotBuilder
 from trade_runtime.ingestion.binance_market import BinanceMarketMessageParser
+from trade_runtime.ingestion.binance_rest import BinanceFuturesRestFeed, BinanceRestMarketClient
 from trade_runtime.ingestion.news_feed import NewsFeedAdapter
 from trade_runtime.ingestion.okx_market import OkxMarketMessageParser
 from trade_runtime.ingestion.okx_rest import OkxRestMarketClient
@@ -44,8 +45,35 @@ _DEFAULT_MARKET_DATA_ENHANCEMENT = {
 }
 
 
-def _market_data_enhancement_config(runtime_config: dict[str, Any] | None) -> dict[str, Any]:
+def _enhancement_exchanges(config: dict[str, Any]) -> set[str]:
+    """Venues allowed to run the REST enhancement path.
+
+    Defaults to OKX alone, which is the behaviour this path shipped with.
+    """
+    raw = config.get("exchanges") or config.get("enabledExchanges")
+    if isinstance(raw, str):
+        raw = [item.strip() for item in raw.split(",")]
+    if not isinstance(raw, (list, tuple, set)) or not raw:
+        return {"okx"}
+    resolved = {str(item or "").strip().lower() for item in raw}
+    resolved.discard("")
+    return resolved or {"okx"}
+
+
+def _market_data_enhancement_config(runtime_config: Any | None) -> dict[str, Any]:
     config = dict(_DEFAULT_MARKET_DATA_ENHANCEMENT)
+    # Callers are inconsistent: runtime_runner passes RuntimeConfig.model_dump()
+    # while the bootstrap paths pass the RuntimeConfig object itself. Rejecting
+    # the object silently returned pure defaults, so operator configuration was
+    # honoured on one code path and ignored on the other — klineIntervals and
+    # klineLimit came back as defaults with no error anywhere.
+    if runtime_config is not None and not isinstance(runtime_config, dict):
+        model_dump = getattr(runtime_config, "model_dump", None)
+        if callable(model_dump):
+            try:
+                runtime_config = model_dump()
+            except Exception:
+                return config
     if not isinstance(runtime_config, dict):
         return config
     runtime_flags = _parse_object_json(runtime_config.get("runtime_flags") or runtime_config.get("runtimeFlags"))
@@ -97,22 +125,23 @@ def _wyckoff_shortterm_config(
 
 
 class BinancePublicMarketFeed:
-    def __init__(self, timeout: int = 5):
+    """Price tick plus the derivative signals the websocket path used to carry.
+
+    This used to return last price and quote volume only, which left
+    fundingRateAbs, markPriceDeviationPct and every open-interest signal without
+    data whenever the runtime was on REST — the thresholds existed, the
+    evaluation code existed, but nothing ever reached them.
+    """
+
+    def __init__(self, timeout: int = 5, derivative_min_refresh_seconds: float = 30.0):
         self.timeout = timeout
+        self._feed = BinanceFuturesRestFeed(
+            timeout=timeout,
+            derivative_min_refresh_seconds=derivative_min_refresh_seconds,
+        )
 
     def fetch(self, symbol: str) -> dict[str, Any]:
-        response = requests.get(
-            "https://fapi.binance.com/fapi/v1/ticker/24hr",
-            params={"symbol": symbol},
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        payload: dict[str, Any] = response.json()
-        return {
-            "s": payload["symbol"],
-            "c": payload["lastPrice"],
-            "q": payload.get("quoteVolume") or payload.get("volume", "0"),
-        }
+        return self._feed.fetch(symbol)
 
 
 class OkxPublicMarketFeed:
@@ -1272,7 +1301,12 @@ class RuntimeInputAssembler:
     def _rest_market_client(self) -> Any:
         if self.rest_market_client is not None:
             return self.rest_market_client
-        self.rest_market_client = OkxRestMarketClient()
+        # Both clients expose the same duck-typed surface the enhancement path
+        # calls: fetch_ticker / fetch_mark_price / fetch_funding_rate /
+        # fetch_open_interest / fetch_candles.
+        self.rest_market_client = (
+            OkxRestMarketClient() if self.exchange == "okx" else BinanceRestMarketClient()
+        )
         return self.rest_market_client
 
     def _enhanced_market_events(
@@ -1284,7 +1318,17 @@ class RuntimeInputAssembler:
         strategy_context: dict[str, Any] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         config = _market_data_enhancement_config(runtime_config)
-        if self.exchange != "okx" or config.get("enabled") is False:
+        # This path was hardcoded to OKX, which left Binance — the default
+        # exchange — with no klines at all, and therefore no atr_pct / rsi_14 /
+        # ema_trend, no klinePriceChangePct15m|60m|240m triggers, no liquidation
+        # aggregate windows and no Wyckoff analysis. Everything below is
+        # duck-typed against the REST client, so it works for either venue.
+        #
+        # `exchanges` defaults to OKX only so that enabling this for Binance is
+        # a deliberate configuration choice: it changes which events reach the
+        # gate, and that is not something to switch on under a running strategy
+        # without saying so. Set ["okx","binance"] in marketDataEnhancement.
+        if self.exchange not in _enhancement_exchanges(config) or config.get("enabled") is False:
             return [], {}
         client = self._rest_market_client()
         events: list[dict[str, Any]] = []
@@ -1303,7 +1347,7 @@ class RuntimeInputAssembler:
                 try:
                     event = fetch_ticker(symbol)
                 except Exception as exc:
-                    logger.exception("okx rest enhancement failed method=%s symbol=%s error=%s", "fetch_ticker", symbol, exc)
+                    logger.exception("rest enhancement failed exchange=%s method=%s symbol=%s error=%s", self.exchange, "fetch_ticker", symbol, exc)
                 else:
                     if isinstance(event, dict) and event.get("event_type"):
                         events.append(event)
@@ -1314,7 +1358,7 @@ class RuntimeInputAssembler:
             try:
                 event = method(symbol)
             except Exception as exc:
-                logger.exception("okx rest enhancement failed method=%s symbol=%s error=%s", method_name, symbol, exc)
+                logger.exception("rest enhancement failed exchange=%s method=%s symbol=%s error=%s", self.exchange, method_name, symbol, exc)
                 continue
             if isinstance(event, dict) and event.get("event_type"):
                 events.append(event)
@@ -1325,7 +1369,7 @@ class RuntimeInputAssembler:
                     try:
                         candles = fetch_candles(symbol, interval=interval, limit=config.get("klineLimit") or 120)
                     except Exception as exc:
-                        logger.exception("okx kline enhancement failed interval=%s symbol=%s error=%s", interval, symbol, exc)
+                        logger.exception("kline enhancement failed exchange=%s interval=%s symbol=%s error=%s", self.exchange, interval, symbol, exc)
                         continue
                     normalized_candles = [dict(item) for item in candles if isinstance(item, dict)]
                     if normalized_candles:

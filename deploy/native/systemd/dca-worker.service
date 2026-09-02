@@ -10,6 +10,11 @@ User=dca
 Group=dca
 WorkingDirectory=/opt/dca/app/python-worker
 EnvironmentFile=/opt/dca/env/worker.env
+# After=dca-backend only means the unit started, not that Spring Boot is
+# listening — it needs ~20s. Without this the first bootstrap fetch dies on
+# connection-refused and the worker restarts into a crash loop until it wins
+# the race.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do wget -q -O /dev/null "$TRADE_RUNTIME_BASE_URL/dca/callback/health" && exit 0; sleep 2; done; echo "backend not ready after 120s" >&2; exit 1'
 ExecStart=/opt/dca/venv/bin/python main.py
 Restart=always
 RestartSec=15s

@@ -128,3 +128,70 @@ default-time-zone = '+08:00'
 字段长度与精度是推断值（`BigDecimal` 统一给 `decimal(36,18)`，字符串按列名尾词判断 varchar/text），只有仓库自带契约测试和 `sql/migrations/` 里写死的类型是确定的。表结构与列名是精确的；类型足够跑通，但不保证与作者原始 dump 逐字节一致。
 
 验证方式：后端正常启动、admin 登录、菜单树渲染、12 个交易域接口全部 200，以及 worker 持续向 `decision_run` / `signal_event` / `event_raw` / `market_event` 写入——读写两侧都过了。
+
+## 行情信号覆盖（Binance）
+
+调研了一圈近期活跃的开源量化项目后，最值得做的升级并不是引入新框架，而是**把这个系统自己已经写好、却没有数据的触发维度接通**。
+
+### 原状：一半以上的行情触发是死的
+
+`mark_price`、`funding_rate`、`liquidation` 事件**只在 `binance_ws.py` 里生产**，`open_interest` 则完全没有 Binance 的生产者。REST 回退路径（`BinancePublicMarketFeed`）只返回最新价和成交额三个字段。
+
+更彻底的是，K 线与技术指标所在的 `_enhanced_market_events` 开头就是 `if self.exchange != "okx"` —— **整个增强层是 OKX 专用的**。而默认交易所是 Binance。
+
+于是在 Binance 上（尤其是本机这种 WS 被封、只能走 REST 的环境），下列全部无数据可评估：
+
+| 触发/特征 | 原状 |
+| --- | --- |
+| `fundingRateAbs` | 无数据 |
+| `markPriceDeviationPct` | 无数据 |
+| `klinePriceChangePct15m / 60m / 240m` | 无 K 线 |
+| `atr_pct` / `rsi_14` / `ema_trend` | 无 K 线 |
+| 量价信号、Wyckoff 短线分析 | 无 K 线 |
+| 持仓量及其变化 | 无生产者 |
+| 爆仓聚合窗口 | 无数据 |
+
+实际参与门控的只剩价格变化和加速度两项。而这恰恰是对「持仓拥挤度」信息量最低的两个指标——资金费率持续高于 0.05–0.1%/8h 意味着多头过度杠杆、常先于爆仓瀑布，持仓量则是永续三大核心观测量之一。
+
+### 现状
+
+新增 `ingestion/binance_rest.py`，用公开且免鉴权的 REST 端点补齐：
+
+| 端点 | 产出 |
+| --- | --- |
+| `/fapi/v1/premiumIndex` | `mark_price`（含 indexPrice 与基差）、`funding_rate` |
+| `/fapi/v1/openInterest` | `open_interest`（附按标记价折算的 USD 名义值） |
+| `/futures/data/openInterestHist` | 持仓量变化率 |
+| `/fapi/v1/klines` | K 线 → ATR / RSI / EMA 趋势 / 三窗口涨跌与量比 |
+
+接入点是 `_market_events`——websocket 路径本来就用这个键把补充事件交给 `_supplemental_market_events`，所以装配器、触发策略和决策图都不需要改动。资金费率每 8 小时结算、持仓量约每分钟更新，因此衍生品端点默认 30 秒节流，不会浪费限频权重；任一衍生品端点失败都不影响价格 tick，因为 tick 决定数据源健康度，而 `risk/guard.py` 一旦判定数据源异常就会拦下所有下单。
+
+**关于爆仓数据**：全市场爆仓只有 `!forceOrder@arr` 这个 websocket 流，`/fapi/v1/forceOrders` 是 USER_DATA、只返回你自己的爆仓。公开 REST 没有对应来源，所以本模块**不合成** `liquidation` 事件——在一个准备上实盘的系统里，把推断值伪装成交易所上报事实是不可接受的。取而代之提供持仓量，它才是去杠杆过程中真正可观测的量。因此爆仓聚合窗口在纯 REST 环境下仍为 0。
+
+### 配置
+
+增强层的 `exchanges` **默认仍只有 OKX**。打开 Binance 会改变进入门控的事件构成，这不是应该在策略运行中被静默切换的东西：
+
+```json
+{
+  "marketDataEnhancement": {
+    "exchanges": ["okx", "binance"],
+    "klineIntervals": ["1m", "15m"],
+    "klineLimit": 500
+  },
+  "marketTrigger": {
+    "fundingRateAbs": 0.0005,
+    "markPriceDeviationPct": 0.25
+  }
+}
+```
+
+`klineIntervals` 只取 1m 和 15m：`summarize_kline_context` 以 1m 为主序列推导 15m/60m/240m 窗口，另用 15m 序列算 60m 指标，默认那五个区间里有三个拉了没人用。`klineLimit` 需要 500——240m 量比要比较前后各 240 根 1m 线，默认的 120 会让这个「240 分钟窗口」实际只有 120 分钟且量比恒为 0。
+
+两个阈值的取值依据：本机实测 mark 与最新价偏离常态在 ±0.05% 以内，0.25% 是真正的价格脱节；资金费率基准约 0.01%/8h，0.05% 是文献中「多头拥挤」的下沿。
+
+**这些阈值没有经过回测。** 这个仓库没有任何历史回测设施（`replay` 只是把单条 `trace_id` 重放一遍，不是历史检验），所以全部触发阈值——包括原有的 `priceChangePct: 2.5`——都是人工选定值。上实盘前，把阈值放到历史数据上校准是比再加信号更有价值的下一步。
+
+### 顺带修掉的一个隐性缺陷
+
+`_market_data_enhancement_config` 遇到非 dict 入参会**静默返回全部默认值**。而调用方并不一致：`runtime_runner` 传的是 `RuntimeConfig.model_dump()`，bootstrap 路径传的是 `RuntimeConfig` 对象。结果同一份运维配置在一条路径上生效、在另一条路径上被忽略，且没有任何日志。现在两种入参都接受。

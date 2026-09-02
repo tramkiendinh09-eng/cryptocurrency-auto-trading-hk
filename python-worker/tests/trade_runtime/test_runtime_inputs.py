@@ -16,32 +16,132 @@ from trade_runtime.runtime_inputs import (
 )
 
 
-def test_binance_public_market_feed_fetches_futures_ticker(monkeypatch):
-    captured = {}
+class _BinanceRestStub:
+    """Routes the public futures endpoints the REST feed depends on."""
 
-    class DummyResponse:
-        def raise_for_status(self):
-            return None
+    RESPONSES = {
+        "/fapi/v1/ticker/24hr": {
+            "symbol": "BTCUSDT",
+            "lastPrice": "65000.1",
+            "quoteVolume": "123.4",
+            "volume": "99.9",
+            "priceChangePercent": "1.5",
+            "closeTime": "1700000000000",
+        },
+        "/fapi/v1/premiumIndex": {
+            "symbol": "BTCUSDT",
+            "markPrice": "65010.0",
+            "indexPrice": "65000.0",
+            "lastFundingRate": "0.00075",
+            "nextFundingTime": "1700028800000",
+            "time": "1700000000000",
+        },
+        "/fapi/v1/openInterest": {
+            "symbol": "BTCUSDT",
+            "openInterest": "1000.0",
+            "time": "1700000000000",
+        },
+        "/futures/data/openInterestHist": [
+            {"sumOpenInterestValue": "1000000.0"},
+            {"sumOpenInterestValue": "900000.0"},
+        ],
+    }
 
-        def json(self):
-            return {"symbol": "BTCUSDT", "lastPrice": "65000.1", "quoteVolume": "123.4", "volume": "99.9"}
+    def __init__(self):
+        self.calls = []
 
-    def fake_get(url, params=None, timeout=None):
-        captured["url"] = url
-        captured["params"] = params
-        captured["timeout"] = timeout
-        return DummyResponse()
+    def __call__(self, url, params=None, timeout=None):
+        path = url.replace("https://fapi.binance.com", "")
+        self.calls.append(path)
+        body = self.RESPONSES[path]
 
-    monkeypatch.setattr("trade_runtime.runtime_inputs.requests.get", fake_get)
+        class _Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return body
+
+        return _Response()
+
+
+def test_binance_public_market_feed_fetches_ticker_and_derivative_events(monkeypatch):
+    """The REST path must carry the signals the websocket path used to carry.
+
+    mark_price, funding_rate and open interest previously existed only on the
+    websocket feed, so fundingRateAbs / markPriceDeviationPct and every
+    open-interest signal had no data whenever the runtime ran on REST.
+    """
+    stub = _BinanceRestStub()
+    monkeypatch.setattr("trade_runtime.ingestion.binance_rest.requests.get", stub)
 
     payload = BinancePublicMarketFeed(timeout=4).fetch("BTCUSDT")
 
-    assert captured["url"] == "https://fapi.binance.com/fapi/v1/ticker/24hr"
-    assert captured["params"] == {"symbol": "BTCUSDT"}
-    assert captured["timeout"] == 4
     assert payload["s"] == "BTCUSDT"
-    assert payload["c"] == "65000.1"
-    assert payload["q"] == "123.4"
+    assert payload["c"] == pytest.approx(65000.1)
+    assert payload["q"] == pytest.approx(123.4)
+    assert "/fapi/v1/ticker/24hr" in stub.calls
+
+    events = {event["event_type"]: event for event in payload["_market_events"]}
+    assert set(events) == {"mark_price", "funding_rate", "open_interest"}
+
+    assert events["mark_price"]["price"] == pytest.approx(65010.0)
+    assert events["mark_price"]["index_price"] == pytest.approx(65000.0)
+    assert events["funding_rate"]["funding_rate"] == pytest.approx(0.00075)
+    assert events["open_interest"]["open_interest"] == pytest.approx(1000.0)
+    # notional is what the size-based thresholds are written against
+    assert events["open_interest"]["open_interest_notional_usd"] == pytest.approx(65010000.0)
+    assert events["open_interest"]["open_interest_change_pct"] == pytest.approx(-10.0)
+
+    for event in payload["_market_events"]:
+        assert event["exchange"] == "binance"
+        assert event["symbol"] == "BTCUSDT"
+
+
+def test_binance_public_market_feed_throttles_derivative_endpoints(monkeypatch):
+    """Funding settles 8-hourly; re-fetching it every poll only spends weight."""
+    stub = _BinanceRestStub()
+    monkeypatch.setattr("trade_runtime.ingestion.binance_rest.requests.get", stub)
+
+    clock = {"now": 1000.0}
+    feed = BinancePublicMarketFeed(timeout=4, derivative_min_refresh_seconds=30.0)
+    feed._feed.time_fn = lambda: clock["now"]
+
+    feed.fetch("BTCUSDT")
+    first_round = list(stub.calls)
+    assert "/fapi/v1/premiumIndex" in first_round
+
+    clock["now"] += 5.0
+    payload = feed.fetch("BTCUSDT")
+    # ticker is refetched every call, derivatives come from cache
+    assert stub.calls.count("/fapi/v1/ticker/24hr") == 2
+    assert stub.calls.count("/fapi/v1/premiumIndex") == 1
+    assert len(payload["_market_events"]) == 3
+
+    clock["now"] += 60.0
+    feed.fetch("BTCUSDT")
+    assert stub.calls.count("/fapi/v1/premiumIndex") == 2
+
+
+def test_binance_rest_feed_keeps_price_when_derivatives_fail(monkeypatch):
+    """A derivative endpoint failing must not cost us the price tick.
+
+    The tick is what keeps the market source healthy; risk/guard.py blocks every
+    order once the source is judged abnormal.
+    """
+    stub = _BinanceRestStub()
+
+    def flaky(url, params=None, timeout=None):
+        if "premiumIndex" in url or "openInterest" in url:
+            raise RuntimeError("boom")
+        return stub(url, params=params, timeout=timeout)
+
+    monkeypatch.setattr("trade_runtime.ingestion.binance_rest.requests.get", flaky)
+
+    payload = BinancePublicMarketFeed(timeout=4).fetch("BTCUSDT")
+
+    assert payload["c"] == pytest.approx(65000.1)
+    assert "_market_events" not in payload
 
 
 def test_okx_public_market_feed_fetches_swap_ticker(monkeypatch):
@@ -1399,3 +1499,42 @@ def test_runtime_input_assembler_prunes_market_window_to_last_fifteen_minutes():
             "state": {"count": 2, "last_price": 110.0, "price_change_pct": 4.7619},
         }
     ]
+
+
+def test_market_data_enhancement_config_accepts_model_and_dict_alike():
+    """Operator config must win on every call path.
+
+    runtime_runner passes RuntimeConfig.model_dump(); the bootstrap paths pass
+    the RuntimeConfig object. The object form used to fall through to pure
+    defaults, so klineIntervals / klineLimit were silently ignored on one of the
+    two paths with nothing logged.
+    """
+    from trade_runtime.runtime_inputs import (
+        _enhancement_exchanges,
+        _market_data_enhancement_config,
+    )
+
+    flags = (
+        '{"marketDataEnhancement":{"klineIntervals":["1m","15m"],'
+        '"klineLimit":500,"exchanges":["okx","binance"]}}'
+    )
+    config = RuntimeConfig(runtimeFlagsJson=flags)
+
+    from_dict = _market_data_enhancement_config(config.model_dump())
+    from_model = _market_data_enhancement_config(config)
+
+    for resolved in (from_dict, from_model):
+        assert resolved["klineIntervals"] == ["1m", "15m"]
+        assert resolved["klineLimit"] == 500
+        assert _enhancement_exchanges(resolved) == {"okx", "binance"}
+
+
+def test_market_data_enhancement_defaults_to_okx_only():
+    """Binance enhancement is opt-in: it changes which events reach the gate."""
+    from trade_runtime.runtime_inputs import (
+        _enhancement_exchanges,
+        _market_data_enhancement_config,
+    )
+
+    resolved = _market_data_enhancement_config({})
+    assert _enhancement_exchanges(resolved) == {"okx"}
