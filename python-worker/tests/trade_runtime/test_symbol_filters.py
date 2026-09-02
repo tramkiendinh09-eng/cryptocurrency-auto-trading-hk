@@ -246,3 +246,36 @@ def test_reduce_only_flag_is_forwarded(filters):
 
     order_calls = [r for r in session.requests if r["url"].endswith("/fapi/v1/order")]
     assert order_calls[0]["params"]["reduceOnly"] == "true"
+
+
+# ── leverage ceiling ──────────────────────────────────────────────────────
+
+def test_leverage_hint_is_capped_by_runtime_config():
+    """leverage_hint is model output; unbounded it can set 50x on the account."""
+    from trade_runtime.decision.nodes.execution_node import _resolve_leverage
+
+    state = {"runtime_config": {"max_leverage": 3}}
+    assert _resolve_leverage(state, {"leverage_hint": 50}) == pytest.approx(3.0)
+    assert _resolve_leverage(state, {"leverage_hint": 2}) == pytest.approx(2.0)
+
+
+def test_leverage_falls_back_to_conservative_default():
+    """Too little leverage costs a rejected order; too much costs the account."""
+    from trade_runtime.decision.nodes.execution_node import (
+        DEFAULT_MAX_LEVERAGE,
+        _resolve_leverage,
+    )
+
+    assert _resolve_leverage({}, {"leverage_hint": 125}) == pytest.approx(DEFAULT_MAX_LEVERAGE)
+    assert _resolve_leverage({"runtime_config": {}}, {"leverage_hint": 20}) == pytest.approx(
+        DEFAULT_MAX_LEVERAGE
+    )
+
+
+def test_absent_or_invalid_leverage_stays_absent():
+    from trade_runtime.decision.nodes.execution_node import _resolve_leverage
+
+    assert _resolve_leverage({}, {}) is None
+    assert _resolve_leverage({}, {"leverage_hint": 0}) is None
+    assert _resolve_leverage({}, {"leverage_hint": -5}) is None
+    assert _resolve_leverage({}, {"leverage_hint": "abc"}) is None

@@ -400,6 +400,38 @@ def _optional_float(value) -> float | None:
         return None
 
 
+DEFAULT_MAX_LEVERAGE = 3.0
+
+
+def _resolve_leverage(state, decision) -> float | None:
+    """Bound the leverage the supervisor asked for.
+
+    ``leverage_hint`` comes straight out of the model. Binance applies leverage
+    as account state, so an unbounded hint is not merely a bad order — it
+    changes the margin regime for every later order on that symbol too.
+
+    ``maxLeverage`` in the runtime config is the ceiling; the fallback is
+    deliberately low, because the failure mode of too little leverage is a
+    rejected order and the failure mode of too much is a liquidation.
+    """
+    raw = _optional_float(decision.get("leverage") or decision.get("leverage_hint"))
+    runtime_config = state.get("runtime_config") if isinstance(state, dict) else None
+    ceiling = None
+    if isinstance(runtime_config, dict):
+        ceiling = _optional_float(
+            runtime_config.get("max_leverage")
+            if runtime_config.get("max_leverage") is not None
+            else runtime_config.get("maxLeverage")
+        )
+    if ceiling is None or ceiling <= 0:
+        ceiling = DEFAULT_MAX_LEVERAGE
+    if raw is None:
+        return None
+    if raw <= 0:
+        return None
+    return min(float(raw), float(ceiling))
+
+
 def _enrich_order_metadata(state: DecisionState, decision: dict, order: dict) -> dict:
     action = str(decision.get("action") or "").strip().upper()
     enriched = dict(order)
@@ -410,7 +442,7 @@ def _enrich_order_metadata(state: DecisionState, decision: dict, order: dict) ->
     raw_order_type = str(decision.get("order_type") or decision.get("orderType") or "market").strip().lower()
     enriched["order_type"] = _order_type(decision)
     enriched["post_only"] = bool(decision.get("post_only") or decision.get("postOnly")) or raw_order_type == "post_only"
-    leverage = _optional_float(decision.get("leverage") or decision.get("leverage_hint"))
+    leverage = _resolve_leverage(state, decision)
     if leverage is not None:
         enriched["leverage"] = int(leverage) if leverage.is_integer() else leverage
     limit_price = _optional_float(decision.get("limit_price") or decision.get("limitPrice"))

@@ -456,7 +456,7 @@ public class TradeRuntimeConfigServiceImpl implements ITradeRuntimeConfigService
             config.setRouteMaxConcurrency(DEFAULT_ROUTE_MAX_CONCURRENCY);
         }
         config.setRouteSchedulerMode(normalizeRouteSchedulerMode(config.getRouteSchedulerMode()));
-        config.setAllowedSymbolsJson(normalizeArrayJson(config.getAllowedSymbolsJson(), TradeConstants.V1_ALLOWED_SYMBOLS, "allowedSymbolsJson"));
+        config.setAllowedSymbolsJson(normalizeArrayJson(config.getAllowedSymbolsJson(), resolveSymbolUniverse(config), "allowedSymbolsJson"));
         config.setAllowedExchangesJson(normalizeArrayJson(config.getAllowedExchangesJson(), TradeConstants.V1_ALLOWED_EXCHANGES, "allowedExchangesJson"));
         config.setRuntimeFlagsJson(normalizeRuntimeFlagsJson(config.getRuntimeFlagsJson()));
         config.setNotifyDefaultsJson(normalizeObjectJson(config.getNotifyDefaultsJson(), "notifyDefaultsJson"));
@@ -1229,6 +1229,45 @@ public class TradeRuntimeConfigServiceImpl implements ITradeRuntimeConfigService
         return ("THREAD_POOL".equals(normalized) || "SERIAL".equals(normalized))
             ? normalized
             : DEFAULT_ROUTE_SCHEDULER_MODE;
+    }
+
+    /**
+     * 可交易品种域。
+     *
+     * <p>此前直接以 {@link TradeConstants#V1_ALLOWED_SYMBOLS} 作为白名单，等于把系统
+     * 永久限制在 BTCUSDT/ETHUSDT/SOLUSDT 三个品种上，配置任何其他标的都会以
+     * {@code unsupported scope} 拒绝并使 bootstrap 返回 500。而交易所实际提供 569 个
+     * 币本位永续和 188 个 TRADIFI_PERPETUAL（股票/商品）标的。
+     *
+     * <p>白名单本身是有价值的护栏——它能挡住手滑写错的代码——所以这里保留校验，
+     * 只是把品种域改为可由运行时标志 {@code symbolUniverse} 覆盖；未配置时仍回落到
+     * 原有常量，行为与改动前一致。
+     */
+    private List<String> resolveSymbolUniverse(TradeRuntimeConfig config) {
+        // 注意：allowedSymbolsJson 的归一化发生在 runtimeFlagsJson 归一化之前，
+        // 因此这里读取的是尚未合并默认值的原始 JSON。
+        String rawFlags = config == null ? null : config.getRuntimeFlagsJson();
+        if (isBlank(rawFlags)) {
+            return TradeConstants.V1_ALLOWED_SYMBOLS;
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(rawFlags, new TypeReference<Map<String, Object>>() {});
+            Object universe = parsed == null ? null : parsed.get("symbolUniverse");
+            if (!(universe instanceof List<?> listValue) || listValue.isEmpty()) {
+                return TradeConstants.V1_ALLOWED_SYMBOLS;
+            }
+            LinkedHashSet<String> resolved = new LinkedHashSet<>(TradeConstants.V1_ALLOWED_SYMBOLS);
+            for (Object item : listValue) {
+                String candidate = item == null ? "" : String.valueOf(item).trim().toUpperCase();
+                if (!candidate.isEmpty()) {
+                    resolved.add(candidate);
+                }
+            }
+            return new ArrayList<>(resolved);
+        } catch (IOException e) {
+            // 标志本身的格式错误交由 normalizeRuntimeFlagsJson 报告，这里不抢先抛出。
+            return TradeConstants.V1_ALLOWED_SYMBOLS;
+        }
     }
 
     private String normalizeArrayJson(String rawJson, List<String> allowedValues, String fieldName) {
