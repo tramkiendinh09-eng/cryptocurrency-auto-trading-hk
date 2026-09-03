@@ -27,6 +27,9 @@ def build_service() -> FeedAdapterService:
                 timeout=settings.request_timeout_seconds,
                 max_age_hours=settings.news_max_age_hours,
                 user_agent=settings.user_agent,
+                # 与按标的的刷新窗口同步：一篇 RSS 在一个窗口内只抓一次，
+                # 12 个标的共用，上游请求量与标的数量脱钩
+                document_cache_seconds=settings.news_min_refresh_seconds,
             ),
         ),
         social_provider=MinRefreshCachedProvider(

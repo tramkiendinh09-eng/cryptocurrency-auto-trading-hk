@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import logging
+import re
 from typing import Callable
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
@@ -13,6 +15,34 @@ from feed_adapter.models import UpstreamUnavailableError
 from feed_adapter.symbols import matches_symbol
 
 logger = logging.getLogger(__name__)
+
+
+# 命中其一给 +0.2。这一步是有实际后果的：newsTrigger.scoreThreshold 是
+# 0.80，而基础分 0.65 + 新鲜度 0.10 只有 0.75 —— 不命中任何一个词的新闻
+# 永远过不了触发线。原表全是加密与宏观口径，半导体标的结构上无法达标。
+_EVENT_KEYWORDS = (
+    # 加密 / 宏观（原有）
+    "etf", "sec", "liquidation", "hack", "exploit", "inflow", "outflow", "fomc", "cpi",
+    # 股票口径的事件词。只收"能让价格跳"的，不收 chip / memory 这类行业泛称——
+    # 后者几乎出现在每一篇报道里，加进来等于把这道阈值取消掉。
+    "earnings", "guidance", "forecast", "outlook", "downgrade", "upgrade",
+    "export control", "sanction", "tariff", "recall", "lawsuit", "antitrust",
+    "shortage", "capacity cut", "production cut", "supply deal", "acquisition",
+)
+
+# 超过这个时长的条目仍然返回（作为给模型的背景），但分数封顶在触发线
+# 以下，不再充当触发器。
+_FRESH_WINDOW_HOURS = 8
+# 封到基础分：worker 侧还有一道 ruleOnlyScoreThreshold（默认 0.7）会把
+# 0.7~0.8 之间的分数判成 RULE_ONLY，那同样是一次触发。取 0.65 让过期条目
+# 落在两道门槛之下，真正只作为上下文存在。
+_STALE_SCORE_CAP = 0.65
+
+
+@dataclass
+class _Document:
+    fetched_at: datetime
+    payload: str
 
 
 def _default_fetch_text(url: str, timeout: int, user_agent: str) -> str:
@@ -31,6 +61,7 @@ class RssNewsProvider:
         timeout: int = 8,
         max_age_hours: int = 24,
         user_agent: str = "web4-first-feed-adapter/1.0",
+        document_cache_seconds: int = 0,
     ):
         self.feed_urls = list(feed_urls)
         self.fetch_text = fetch_text or _default_fetch_text
@@ -38,21 +69,43 @@ class RssNewsProvider:
         self.timeout = timeout
         self.max_age_hours = max(int(max_age_hours or 0), 0)
         self.user_agent = user_agent
+        # 同一篇 RSS 在这个窗口内只抓一次，所有标的共用
+        self.document_cache_seconds = max(int(document_cache_seconds or 0), 0)
+        self._documents: dict[str, _Document] = {}
+
+    def _fetch_document(self, url: str) -> str:
+        """取一篇 RSS 原文，命中缓存则不走网络。"""
+        now = self.current_time_supplier().astimezone(timezone.utc)
+        cached = self._documents.get(url)
+        if cached is not None and self.document_cache_seconds > 0:
+            age = max((now - cached.fetched_at).total_seconds(), 0.0)
+            if age < self.document_cache_seconds:
+                logger.info(
+                    "feed_adapter_document_cache provider=news url=%s cache_status=hit age_seconds=%.2f",
+                    url,
+                    age,
+                )
+                return cached.payload
+        logger.info(
+            "feed_adapter_upstream_request provider=news url=%s timeout=%s",
+            url,
+            self.timeout,
+        )
+        try:
+            payload = self.fetch_text(url, self.timeout, self.user_agent)
+        except TypeError:
+            # 老式的两参数 fetch_text（测试里常这么注入）
+            payload = self.fetch_text(url, self.timeout)
+        if self.document_cache_seconds > 0:
+            self._documents[url] = _Document(fetched_at=now, payload=payload)
+        return payload
 
     def fetch(self, symbol: str) -> list[dict]:
         items: list[dict] = []
         failures = 0
         for url in self.feed_urls:
-            logger.info(
-                "feed_adapter_upstream_request provider=news symbol=%s url=%s timeout=%s",
-                symbol or "-",
-                url,
-                self.timeout,
-            )
             try:
-                xml_payload = self.fetch_text(url, self.timeout, self.user_agent)
-            except TypeError:
-                xml_payload = self.fetch_text(url, self.timeout)
+                xml_payload = self._fetch_document(url)
             except Exception as exc:
                 failures += 1
                 logger.warning(
@@ -145,13 +198,26 @@ class RssNewsProvider:
     def _score_item(self, title: str, summary: str, event_time: str) -> float:
         score = 0.65
         text = f"{title} {summary}".lower()
-        if any(word in text for word in ("etf", "sec", "liquidation", "hack", "exploit", "inflow", "outflow", "fomc", "cpi")):
+        # 必须按词匹配。原来是子串包含，三个字母的 "sec" 会命中
+        # second / sector / secretly / cybersecurity —— 实测 255 条里
+        # 有 24 条是这样被误抬到触发线以上的。
+        if any(re.search(rf"\b{re.escape(word)}\b", text) for word in _EVENT_KEYWORDS):
             score += 0.2
+
+        published_at = None
         if event_time:
             try:
                 published_at = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
             except ValueError:
                 published_at = None
-            if published_at is not None and published_at >= self.current_time_supplier() - timedelta(hours=8):
-                score += 0.1
+
+        if published_at is None:
+            # 拿不到发布时间就当它不新鲜，宁可漏触发也不要按旧闻开仓
+            return round(min(score, _STALE_SCORE_CAP), 2)
+
+        fresh_since = self.current_time_supplier() - timedelta(hours=_FRESH_WINDOW_HOURS)
+        if published_at < fresh_since:
+            return round(min(score, _STALE_SCORE_CAP), 2)
+
+        score += 0.1
         return round(min(score, 0.95), 2)
