@@ -1,0 +1,246 @@
+// 精修主题层
+//
+// 这一层只做视觉，不改结构与行为，因此对所有页面生效而无需逐页改动。
+// 针对的是原模板最明显的三个问题：卡片高而空导致信息密度极低、深色侧栏
+// 与纯白内容对比生硬、以及数字排版缺少层级与对齐。
+
+:root {
+  // 中性色阶：明暗两套主题共用同一组语义名，切换时只换取值
+  --rf-bg:            #f4f6f8;
+  --rf-surface:       #ffffff;
+  --rf-surface-sunk:  #f8fafb;
+  --rf-line:          #e6eaee;
+  --rf-line-soft:     #eef1f4;
+  --rf-ink:           #1a2027;
+  --rf-ink-soft:      #5c6b7a;
+  --rf-ink-faint:     #93a1b0;
+
+  --rf-accent:        #2f7df6;
+  --rf-up:            #12a150;   // 盈利 / 多头
+  --rf-down:          #e0453b;   // 亏损 / 空头
+  --rf-warn:          #d98207;
+
+  --rf-radius:        10px;
+  --rf-radius-sm:     6px;
+  --rf-shadow:        0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .06);
+
+  // 侧栏：原值 #1a1f2e 近乎纯黑，与白色内容区对比过硬
+  --sidebar-bg:       #1e2532;
+  --sidebar-text:     #b8c4d4;
+  --menu-hover:       #2a3342;
+}
+
+html.dark {
+  --rf-bg:            #14181d;
+  --rf-surface:       #1b2027;
+  --rf-surface-sunk:  #171c22;
+  --rf-line:          #2a323c;
+  --rf-line-soft:     #232a33;
+  --rf-ink:           #e8edf3;
+  --rf-ink-soft:      #9aa8b8;
+  --rf-ink-faint:     #6b7a8a;
+  --rf-shadow:        0 1px 2px rgba(0, 0, 0, .2), 0 1px 3px rgba(0, 0, 0, .28);
+}
+
+// ── Element Plus 变量对齐 ────────────────────────────────────────────
+:root {
+  --el-color-primary: var(--rf-accent);
+  --el-color-success: var(--rf-up);
+  --el-color-danger:  var(--rf-down);
+  --el-color-error:   var(--rf-down);
+  --el-color-warning: var(--rf-warn);
+  --el-border-radius-base: var(--rf-radius-sm);
+  --el-border-color: var(--rf-line);
+  --el-border-color-light: var(--rf-line-soft);
+  --el-border-color-lighter: var(--rf-line-soft);
+  --el-fill-color-blank: var(--rf-surface);
+  --el-text-color-primary: var(--rf-ink);
+  --el-text-color-regular: var(--rf-ink-soft);
+  --el-text-color-secondary: var(--rf-ink-faint);
+  --el-font-size-base: 13px;
+}
+
+// ── 基础排版 ─────────────────────────────────────────────────────────
+body {
+  background: var(--rf-bg);
+  color: var(--rf-ink);
+  font-size: 13px;
+  // 数字等宽，表格与指标列才能对齐
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+.app-main { background: var(--rf-bg); }
+
+// ── 卡片 ─────────────────────────────────────────────────────────────
+// 原始卡片 padding 20px + 大量留白，一个数字占掉近 180px 高度
+.el-card {
+  border: 1px solid var(--rf-line);
+  border-radius: var(--rf-radius);
+  box-shadow: var(--rf-shadow) !important;
+  background: var(--rf-surface);
+
+  .el-card__header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rf-line-soft);
+    font-weight: 600;
+    font-size: 13.5px;
+  }
+  .el-card__body { padding: 14px 16px; }
+}
+
+// 首页与仪表盘的统计卡：压缩到内容高度
+.summary-grid {
+  .el-col { margin-bottom: 12px; }
+
+  .el-card__body {
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  // 彩色圆角图标块缩小，不再喧宾夺主
+  [class*="icon"], .stat-icon, .card-icon {
+    flex: 0 0 auto;
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 9px !important;
+    display: grid;
+    place-items: center;
+    opacity: .9;
+    svg, i, .svg-icon { width: 18px; height: 18px; font-size: 18px; }
+  }
+}
+
+// 统计数字：收紧行高与字重，标签与数值形成层级
+.summary-grid,
+.stat-card,
+.data-card {
+  h2, h3, .stat-value, .card-value, .value {
+    font-size: 24px !important;
+    font-weight: 650 !important;
+    line-height: 1.2 !important;
+    letter-spacing: -.4px;
+    margin: 2px 0 !important;
+    color: var(--rf-ink);
+  }
+  .stat-label, .card-label, .label, .title {
+    font-size: 12px !important;
+    color: var(--rf-ink-faint) !important;
+    line-height: 1.4;
+  }
+  .stat-foot, .card-foot, .desc, .sub {
+    font-size: 11.5px !important;
+    color: var(--rf-ink-faint) !important;
+  }
+}
+
+// ── 侧边栏 ───────────────────────────────────────────────────────────
+.sidebar-container {
+  box-shadow: none !important;
+  border-right: 1px solid transparent;
+
+  .el-menu { border-right: none; }
+
+  .el-menu-item, .el-sub-menu__title {
+    height: 42px !important;
+    line-height: 42px !important;
+    font-size: 13px;
+    margin: 1px 8px;
+    border-radius: var(--rf-radius-sm);
+    // 图标与文字间距原本过宽
+    .svg-icon, .el-icon { margin-right: 8px; }
+  }
+
+  .el-menu-item.is-active {
+    background: rgba(47, 125, 246, .16) !important;
+    color: #fff !important;
+    font-weight: 600;
+    position: relative;
+    &::before {
+      content: '';
+      position: absolute;
+      left: -8px; top: 8px; bottom: 8px;
+      width: 3px; border-radius: 0 3px 3px 0;
+      background: var(--rf-accent);
+    }
+  }
+
+  .el-sub-menu .el-menu-item { padding-left: 44px !important; }
+}
+
+// 顶部标题区
+.sidebar-logo-container {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  .sidebar-title { font-size: 15px !important; font-weight: 600 !important; }
+}
+
+// ── 顶栏与标签页 ─────────────────────────────────────────────────────
+.navbar {
+  height: 48px !important;
+  border-bottom: 1px solid var(--rf-line);
+  box-shadow: none !important;
+  background: var(--rf-surface);
+}
+.tags-view-container {
+  height: 34px !important;
+  border-bottom: 1px solid var(--rf-line);
+  box-shadow: none !important;
+  background: var(--rf-surface);
+  .tags-view-item {
+    height: 24px; line-height: 24px;
+    border-radius: var(--rf-radius-sm);
+    border-color: var(--rf-line);
+    font-size: 12px;
+  }
+}
+
+// ── 表格 ─────────────────────────────────────────────────────────────
+.el-table {
+  font-size: 12.5px;
+  --el-table-border-color: var(--rf-line-soft);
+
+  th.el-table__cell {
+    background: var(--rf-surface-sunk) !important;
+    font-weight: 600;
+    color: var(--rf-ink-soft) !important;
+    padding: 8px 0;
+  }
+  td.el-table__cell { padding: 7px 0; }
+  .cell { line-height: 1.5; }
+}
+
+// ── 表单与按钮 ───────────────────────────────────────────────────────
+.el-button { font-weight: 500; }
+.el-button--small { padding: 6px 11px; }
+.el-form-item__label { color: var(--rf-ink-soft); font-weight: 500; }
+.el-input__wrapper, .el-select__wrapper, .el-textarea__inner {
+  border-radius: var(--rf-radius-sm);
+  box-shadow: 0 0 0 1px var(--rf-line) inset;
+}
+
+// 查询区
+.app-container > .el-form.el-form--inline {
+  background: var(--rf-surface);
+  border: 1px solid var(--rf-line);
+  border-radius: var(--rf-radius);
+  padding: 12px 14px 0;
+  margin-bottom: 12px;
+}
+
+.app-container { padding: 14px; }
+
+// ── 语义色 ───────────────────────────────────────────────────────────
+.text-up, .is-profit, .up { color: var(--rf-up) !important; }
+.text-down, .is-loss, .down { color: var(--rf-down) !important; }
+
+.el-tag {
+  border-radius: var(--rf-radius-sm);
+  font-weight: 500;
+}
+
+// ── 分页 ─────────────────────────────────────────────────────────────
+.pagination-container { padding: 12px 0 0; background: transparent; }

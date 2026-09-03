@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard-container">
     <el-row :gutter="16" class="summary-grid">
-      <el-col :xs="24" :sm="12" :xl="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-card__content">
             <div class="summary-card__icon summary-card__icon--primary">
@@ -21,7 +21,7 @@
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :sm="12" :xl="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-card__content">
             <div class="summary-card__icon summary-card__icon--success">
@@ -36,7 +36,7 @@
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :sm="12" :xl="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-card__content">
             <div class="summary-card__icon summary-card__icon--warning">
@@ -55,7 +55,7 @@
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :sm="12" :xl="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-card__content">
             <div class="summary-card__icon summary-card__icon--danger">
@@ -72,7 +72,7 @@
     </el-row>
 
     <el-row :gutter="16" class="summary-grid">
-      <el-col :xs="24" :sm="12" :xl="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-card__content">
             <div class="summary-card__icon summary-card__icon--info">
@@ -89,7 +89,7 @@
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :sm="12" :xl="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-card__content">
             <div class="summary-card__icon summary-card__icon--cyan">
@@ -104,7 +104,7 @@
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :sm="12" :xl="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-card__content">
             <div class="summary-card__icon summary-card__icon--violet">
@@ -119,7 +119,7 @@
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :sm="12" :xl="6">
+      <el-col :xs="24" :sm="12" :md="8" :lg="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-card__content">
             <div class="summary-card__icon" :class="workerStatus.online ? 'summary-card__icon--success' : 'summary-card__icon--slate'">
@@ -713,10 +713,10 @@ onUnmounted(() => {
 
 /* 汇总卡片 */
 .summary-card {
-  border: none;
-  border-radius: 16px;
-  background: #fff;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--rf-line, #e6eaee);
+  border-radius: var(--rf-radius, 10px);
+  background: var(--rf-surface, #fff);
+  box-shadow: var(--rf-shadow, 0 1px 3px rgba(16, 24, 40, .06));
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   overflow: hidden;
 }
@@ -729,8 +729,8 @@ onUnmounted(() => {
 .summary-card__content {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 20px;
+  gap: 12px;
+  padding: 14px 16px;
 }
 
 /* 图标渐变背景 */
@@ -738,9 +738,11 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  font-size: 18px;
+  border-radius: 9px;
   color: #fff;
   font-size: 24px;
   flex-shrink: 0;
@@ -799,11 +801,12 @@ onUnmounted(() => {
 }
 
 .summary-card__value {
-  margin-top: 8px;
-  color: #1e293b;
-  font-size: 28px;
-  font-weight: 700;
+  margin-top: 2px;
+  color: var(--rf-ink, #1e293b);
+  font-size: 23px;
+  font-weight: 650;
   line-height: 1.2;
+  letter-spacing: -.4px;
 }
 
 .summary-card__hint {
