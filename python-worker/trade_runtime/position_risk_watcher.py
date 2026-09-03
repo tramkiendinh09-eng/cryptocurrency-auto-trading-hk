@@ -10,6 +10,12 @@ _DEFAULT_CONFIG = {
     "enabled": True,
     "intervalSeconds": 10,
     "cooldownSeconds": 30,
+    # 分级冷却。review 是"看一眼"，reduce/close 才是"要动手"，三者用同一个
+    # 30 秒冷却，结果是浮亏刚过 0.35% 的持仓每 30 秒就把同一个问题重问一遍。
+    "cooldownSecondsBySeverity": {"review": 900, "reduce": 300, "close": 60},
+    # 同一严重级内，驱动指标相对上次派发至少要移动这么多（百分点）才值得
+    # 重新问一次。浮亏从 0.51% 变成 0.53% 不是新信息。
+    "rearmDeltaPct": 0.15,
     "reviewAdverseMovePct": 0.35,
     "reduceAdverseMovePct": 0.7,
     "closeAdverseMovePct": 1.2,
@@ -125,6 +131,15 @@ def resolve_position_risk_watcher_config(
     config["hardCloseEnabled"] = _is_enabled(config.get("hardCloseEnabled"), False)
     config["intervalSeconds"] = max(1, _safe_int(config.get("intervalSeconds"), 10))
     config["cooldownSeconds"] = max(0, _safe_int(config.get("cooldownSeconds"), 30))
+    by_severity = config.get("cooldownSecondsBySeverity")
+    if not isinstance(by_severity, dict):
+        by_severity = {}
+    # 缺哪一级就退回统一的 cooldownSeconds，配置只写一半也不会有哪一级失去冷却。
+    config["cooldownSecondsBySeverity"] = {
+        level: max(0, _safe_int(by_severity.get(level), config["cooldownSeconds"]))
+        for level in ("review", "reduce", "close")
+    }
+    config["rearmDeltaPct"] = max(0.0, _safe_float(config.get("rearmDeltaPct"), 0.0))
     config["marketTickStaleAfterSeconds"] = max(1, _safe_int(config.get("marketTickStaleAfterSeconds"), 90))
     return config
 
@@ -241,6 +256,7 @@ def _base_result(config: dict[str, Any]) -> dict[str, Any]:
         "position_risk_context": {},
         "position_risk_event": {},
         "bypass_trigger_guards": False,
+        "bypass_dispatch_cooldown": False,
     }
 
 
@@ -342,10 +358,34 @@ def evaluate_position_risk(
             "triggered": True,
             "action": action,
             "position_risk_event": event,
-            "bypass_trigger_guards": True,
+            # 只有"要动手"的两级才连 LLM 预算一起绕过。review 级此前也在绕，
+            # 于是一笔浮亏持仓可以无上限地吃掉全部预算——实测近 6 小时里
+            # position_risk 占了全部 LLM 派发的六成，把中转网关打到 503，
+            # 连带把真正紧急的那次问询也一起打掉了。风控要能抢占预算，
+            # 但"看一眼"这一级不该有这个特权。
+            "bypass_trigger_guards": severity in {"reduce", "close"},
+            # 冷却是按"同标的同方向同来源"设的噪声闸门，持仓风险与它无关，
+            # 三级都应当越过。
+            "bypass_dispatch_cooldown": True,
         }
     )
     return result
+
+
+def _driving_metric(result: dict[str, Any]) -> float | None:
+    """取本次触发的驱动指标，用于判断"和上次相比有没有实质变化"。
+
+    只有连续量才返回数值。structure_reversal 是个布尔判定，值恒为 1.0，
+    拿它去比差值会让这一级在第一次派发之后被永久静音。
+    """
+    reason = str(result.get("reason") or "")
+    if reason not in {"adverse_move_close", "adverse_move_reduce", "adverse_move_review", "profit_giveback"}:
+        return None
+    context = result.get("position_risk_context")
+    if not isinstance(context, dict):
+        return None
+    key = "profit_giveback_pct" if reason == "profit_giveback" else "adverse_move_pct"
+    return _safe_float(context.get(key), 0.0)
 
 
 class PositionRiskWatcher:
@@ -382,17 +422,40 @@ class PositionRiskWatcher:
                 str(context.get("entry_price") or ""),
             ]
         )
-        cooldown_seconds = max(0, _safe_int(config.get("cooldownSeconds"), 30))
+        severity = str(result.get("severity") or "none")
+        severity_rank = _SEVERITY_RANK.get(severity, 0)
+        cooldown_seconds = max(
+            0,
+            _safe_int(
+                (config.get("cooldownSecondsBySeverity") or {}).get(severity),
+                _safe_int(config.get("cooldownSeconds"), 30),
+            ),
+        )
+        metric = _driving_metric(result)
         previous = self._cooldowns.get(cooldown_key)
-        severity_rank = _SEVERITY_RANK.get(str(result.get("severity") or "none"), 0)
-        if previous and cooldown_seconds > 0:
+        if previous and severity_rank <= int(previous.get("severity_rank") or 0):
+            # 严重级升高永远放行——那是新信息。没升高时要同时满足两条才
+            # 值得再问一次：冷却已过，且驱动指标真的动了。少了后一条，
+            # 冷却一到期就会拿着几乎一样的数字重问，答案也几乎一定一样。
             elapsed = (now_dt - previous["triggered_at"]).total_seconds()
-            previous_rank = int(previous.get("severity_rank") or 0)
-            if elapsed < cooldown_seconds and severity_rank <= previous_rank:
+            rearm_delta = _safe_float(config.get("rearmDeltaPct"), 0.0)
+            previous_metric = previous.get("metric")
+            unchanged = (
+                rearm_delta > 0
+                and metric is not None
+                and previous_metric is not None
+                and abs(metric - float(previous_metric)) < rearm_delta
+            )
+            if elapsed < cooldown_seconds or unchanged:
                 suppressed = dict(result)
                 suppressed["triggered"] = False
                 suppressed["suppressed_by_cooldown"] = True
                 suppressed["bypass_trigger_guards"] = False
+                suppressed["bypass_dispatch_cooldown"] = False
                 return suppressed
-        self._cooldowns[cooldown_key] = {"triggered_at": now_dt, "severity_rank": severity_rank}
+        self._cooldowns[cooldown_key] = {
+            "triggered_at": now_dt,
+            "severity_rank": severity_rank,
+            "metric": metric,
+        }
         return result

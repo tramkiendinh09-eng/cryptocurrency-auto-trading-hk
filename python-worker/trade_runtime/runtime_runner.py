@@ -485,8 +485,15 @@ class TradeRuntimeRunner:
             strategy_context=strategy_context,
             trigger_state=self.trigger_state,
             now=evaluation_time or datetime.now(timezone.utc),
+            # 持仓风险分两档绕过：reduce/close 连 LLM 预算一起抢占，review 只
+            # 越过噪声冷却、仍然占用预算。合成一个开关时，review 级的重复问询
+            # 会把预算之外的额度无限透支出去。
             bypass_budget=bypass_trigger_guards or bool(position_risk_result.get("bypass_trigger_guards")),
-            bypass_cooldown=bypass_trigger_guards or bool(position_risk_result.get("bypass_trigger_guards")),
+            bypass_cooldown=(
+                bypass_trigger_guards
+                or bool(position_risk_result.get("bypass_trigger_guards"))
+                or bool(position_risk_result.get("bypass_dispatch_cooldown"))
+            ),
         )
         self.trigger_state = dispatch_decision.get("trigger_state") or self.trigger_state
         state = {

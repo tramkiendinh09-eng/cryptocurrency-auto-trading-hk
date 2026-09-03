@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Base64;
 import java.util.Locale;
+import java.util.concurrent.ThreadLocalRandom;
 import java.net.URI;
 import java.math.BigDecimal;
 import javax.crypto.Cipher;
@@ -142,7 +143,7 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService
                 {
                     throw e;
                 }
-                long backoffMs = 400L * (1L << (attempt - 1));
+                long backoffMs = retryBackoffMillis(attempt);
                 log.warn("runtime model call attempt {}/{} failed ({}), retrying in {}ms",
                     attempt, maxAttempts, e.getMessage(), backoffMs);
                 try
@@ -157,6 +158,23 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService
             }
         }
         throw lastError == null ? new ServiceException("runtime model call failed") : lastError;
+    }
+
+    /**
+     * 重试退避：800ms 起指数增长，封顶 8s，并叠加 ±50% 抖动。
+     *
+     * <p>抖动不是装饰。一次决策里多个 agent 几乎同时发起调用，固定退避会让它们
+     * 失败后在同一毫秒重试，把一次并发尖峰原样复制若干遍——中转网关正是在这种
+     * 尖峰下返回 503/522（实测 6 路并发即出现 522，串行则全部成功）。
+     *
+     * <p>起点从 400ms 抬到 800ms 的理由：实测网关的不可用是以分钟计的，几百毫秒
+     * 之后重试基本落在同一次故障里，只是把一次失败变成三次失败。
+     */
+    private long retryBackoffMillis(int attempt)
+    {
+        long base = Math.min(800L * (1L << (attempt - 1)), 8000L);
+        double jitter = 0.5 + ThreadLocalRandom.current().nextDouble();
+        return Math.max(1L, (long) (base * jitter));
     }
 
     /** 瞬时故障才值得重试；配置类错误重试多少次都一样。 */
