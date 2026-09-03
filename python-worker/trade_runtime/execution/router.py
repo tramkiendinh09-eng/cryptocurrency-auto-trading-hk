@@ -204,8 +204,47 @@ class ExecutionRouter:
             return f"paper-{order_ref}"
         return f"shadow-{order.get('symbol', '')}"
 
+    def _paper_venue_check(self, exchange: str, order: dict, context: dict):
+        """Apply the venue's LOT_SIZE / MIN_NOTIONAL rules to a simulated fill.
+
+        Paper mode never contacts the exchange, so it used to fill whatever
+        quantity the sizing produced — 0.08062891 SOL where the venue only
+        accepts multiples of 0.01, or an 8 USDT position on a symbol with a
+        20 USDT minimum. A paper run whose fills are shapes the exchange would
+        reject cannot tell you anything about live behaviour, which is the whole
+        reason for running one.
+
+        Returns (quantity, rejection_reason). An unknown venue passes through.
+        """
+        if str(exchange or "").strip().lower() != "binance":
+            return context["fill_quantity"], ""
+        try:
+            from trade_runtime.execution.symbol_filters import shared_binance_filters
+            decision = shared_binance_filters().resolve_quantity(
+                str(order.get("symbol") or ""), context["fill_quantity"], context["price"]
+            )
+        except Exception:
+            # Filters unavailable (offline, first call failed): do not block the
+            # simulation on a lookup, just fill what was asked for.
+            return context["fill_quantity"], ""
+        if decision.rejected:
+            return 0.0, decision.reason
+        return decision.quantity, ""
+
     def _execute_non_live_order(self, *, mode: str, exchange: str, order: dict, context: dict) -> dict:
         if mode == "paper":
+            quantity, reason = self._paper_venue_check(exchange, order, context)
+            if reason:
+                return self._result(
+                    mode=mode,
+                    exchange=exchange,
+                    order_id=self._simulated_order_id(mode, order),
+                    status="skipped",
+                    order_status="SKIPPED",
+                    context=context,
+                    fill_quantity=0.0,
+                    position_quantity=0.0,
+                ) | {"reason": f"venue_filter:{reason}"}
             return self._result(
                 mode=mode,
                 exchange=exchange,
@@ -213,8 +252,8 @@ class ExecutionRouter:
                 status="filled",
                 order_status="FILLED",
                 context=context,
-                fill_quantity=context["fill_quantity"],
-                position_quantity=context["fill_quantity"],
+                fill_quantity=quantity,
+                position_quantity=quantity,
             )
         return self._result(
             mode=mode,

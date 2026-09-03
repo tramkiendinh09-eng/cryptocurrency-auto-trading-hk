@@ -683,6 +683,50 @@ def _specialist_handoff_messages(state: DecisionState) -> list[dict]:
     return existing_messages + handoff_messages
 
 
+def _market_evidence(state: DecisionState) -> dict:
+    """Market blocks the supervisor prompt explicitly asks the model to use.
+
+    Sourced from build_supervisor_render_context so the fallback prompt and the
+    template path describe the same market.
+    """
+    try:
+        context = build_supervisor_render_context(state)
+    except Exception:
+        return {}
+    if not isinstance(context, dict):
+        return {}
+    # The builder hands the market bundle over as a JSON *string* under
+    # market_context_json; kline_context and derivatives_context live inside it,
+    # not at the top level.
+    raw = context.get("market_context_json")
+    bundle = raw
+    if isinstance(raw, str):
+        try:
+            bundle = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+    if not isinstance(bundle, dict):
+        return {}
+    evidence = {}
+    for key in (
+        "kline_context",
+        "derivatives_context",
+        "liquidation_context",
+        "wyckoff_shortterm",
+        "volume_price_signals",
+        "period_summaries",
+        "trade_tick_status",
+        "market_tick_staleness_seconds",
+    ):
+        value = bundle.get(key)
+        if value not in (None, {}, [], ""):
+            evidence[key] = value
+    status = context.get("market_source_status")
+    if status:
+        evidence["market_source_status"] = status
+    return evidence
+
+
 def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str:
     runtime_config = state.get("runtime_config") or {}
     if not isinstance(runtime_config, dict):
@@ -714,6 +758,15 @@ def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str
             "live_order_requires_healthy_account": runtime_config.get("live_order_requires_healthy_account"),
         },
         "strategy_context": build_prompt_strategy_context(state),
+        # The instruction block below tells the model to base its volume-price and
+        # Wyckoff judgement on kline_context.period_summaries. Until now this
+        # payload carried no market data at all — only the sub-agents' prose
+        # views — so the supervisor was asked to confirm an entry from evidence it
+        # had never been shown, and correctly answered SKIP every single time
+        # (71 of 71 LLM decisions in this deployment). The rich context is already
+        # assembled for the template path; the fallback prompt needs it just as
+        # much.
+        **_market_evidence(state),
         "agent_messages_json": json.dumps(state.get("agent_messages") or [], ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str),
         "deliberation_summary": str(state.get("deliberation_summary") or "").strip(),
         "deliberation_referee_review_json": json.dumps(

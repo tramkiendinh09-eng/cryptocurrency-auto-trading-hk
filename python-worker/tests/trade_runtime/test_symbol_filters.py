@@ -332,3 +332,52 @@ def test_lifecycle_naive_datetime_is_treated_as_utc():
     client = TradeLifecycleClient(base_url="http://x", bearer_token="")
     camel = client._to_camel_payload({"exit_time": datetime(2026, 9, 2, 0, 0, 0)})
     assert camel["exitTime"] == "2026-09-02 08:00:00"
+
+
+# ── paper fills must obey the same venue rules as live ────────────────────
+
+def _router_with_filters(filters, monkeypatch):
+    from trade_runtime.execution import router as router_mod
+    monkeypatch.setattr(
+        "trade_runtime.execution.symbol_filters.shared_binance_filters",
+        lambda testnet=False: filters,
+    )
+    return router_mod.ExecutionRouter(binance_client=None, okx_client=None)
+
+
+def test_paper_fill_is_snapped_to_the_venue_grid(filters, monkeypatch):
+    """A paper run whose fills the exchange would reject predicts nothing."""
+    router = _router_with_filters(filters, monkeypatch)
+    result = router.execute(
+        mode="paper",
+        exchange="binance",
+        order={"symbol": "SOLUSDT", "side": "BUY", "price": 99.0, "quote": 8.0},
+    )
+    assert result["status"] == "filled"
+    # 8 / 99 = 0.0808... which the 0.01 grid rounds down to 0.08
+    assert result["fill_quantity"] == pytest.approx(0.08)
+
+
+def test_paper_order_below_venue_minimum_is_skipped(filters, monkeypatch):
+    """ETH's 20 USDT floor must stop the simulated fill too, or the paper
+    account books trades a real account could never place."""
+    router = _router_with_filters(filters, monkeypatch)
+    result = router.execute(
+        mode="paper",
+        exchange="binance",
+        order={"symbol": "ETHUSDT", "side": "BUY", "price": 2400.0, "quote": 8.0},
+    )
+    assert result["status"] == "skipped"
+    assert "below_min_notional" in result["reason"]
+    assert result["fill_quantity"] == 0.0
+
+
+def test_paper_fill_unaffected_for_other_venues(filters, monkeypatch):
+    router = _router_with_filters(filters, monkeypatch)
+    result = router.execute(
+        mode="paper",
+        exchange="okx",
+        order={"symbol": "SOLUSDT", "side": "BUY", "price": 99.0, "quote": 8.0},
+    )
+    assert result["status"] == "filled"
+    assert result["fill_quantity"] > 0
