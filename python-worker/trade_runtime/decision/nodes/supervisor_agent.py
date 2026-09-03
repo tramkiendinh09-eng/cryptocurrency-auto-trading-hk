@@ -54,6 +54,8 @@
 """
 
 import json
+import math
+import os
 import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -727,6 +729,53 @@ def _market_evidence(state: DecisionState) -> dict:
     return evidence
 
 
+# 交易所对单笔委托的最小名义价值。币安 U 本位合约多数交易对是 5 USDT，
+# 个别是 20。给不出准确值时宁可取大：报小了会让模型开出必然被拒的单子。
+_MIN_ORDER_NOTIONAL_USDT = float(
+    os.getenv("TRADE_RUNTIME_MIN_ORDER_NOTIONAL_USDT", "5") or 5
+)
+_DEFAULT_MAX_LEVERAGE = 3
+
+
+def _sizing_constraints(state: DecisionState, runtime_config: dict) -> dict:
+    """算出这一刻真正可下的仓位区间。
+
+    小账户上这个区间会非常窄甚至为空：100 USDT 权益、max_position_ratio 0.3，
+    可用的 size_hint 只有 0.05~0.30 这一段。模型此前完全看不到这条下界，
+    实际给过 0.04 —— 换算成 4 USDT，交易所根本不接。
+    """
+    equity = _safe_float(state.get("account_equity"), 0.0)
+    max_ratio = _safe_float(runtime_config.get("max_position_ratio"), 0.0)
+    max_leverage = _safe_float(
+        runtime_config.get("max_leverage")
+        if runtime_config.get("max_leverage") is not None
+        else runtime_config.get("maxLeverage"),
+        _DEFAULT_MAX_LEVERAGE,
+    )
+
+    min_size_hint = None
+    if equity > 0:
+        # 向上取整到两位小数，避免边界上算出刚好差一点的单子
+        raw = _MIN_ORDER_NOTIONAL_USDT / equity
+        min_size_hint = math.ceil(raw * 100) / 100
+
+    tradeable = (
+        min_size_hint is not None
+        and max_ratio > 0
+        and min_size_hint <= max_ratio
+    )
+    return {
+        "account_equity": equity,
+        "order_notional_formula": "account_equity * size_hint",
+        "leverage_scales_margin_not_notional": True,
+        "max_leverage": int(max_leverage) if max_leverage > 0 else _DEFAULT_MAX_LEVERAGE,
+        "min_order_notional_usdt": _MIN_ORDER_NOTIONAL_USDT,
+        "min_viable_size_hint": min_size_hint,
+        "max_size_hint": max_ratio or None,
+        "any_size_tradeable": bool(tradeable),
+    }
+
+
 def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str:
     runtime_config = state.get("runtime_config") or {}
     if not isinstance(runtime_config, dict):
@@ -757,6 +806,9 @@ def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str
             "max_consecutive_failures": runtime_config.get("max_consecutive_failures"),
             "live_order_requires_healthy_account": runtime_config.get("live_order_requires_healthy_account"),
         },
+        # 可下仓位的真实区间。不给这一段，模型只能猜，而它猜出来的
+        # size_hint 已经被证实低到交易所不接。
+        "sizing_constraints": _sizing_constraints(state, runtime_config),
         "strategy_context": build_prompt_strategy_context(state),
         # The instruction block below tells the model to base its volume-price and
         # Wyckoff judgement on kline_context.period_summaries. Until now this
@@ -831,7 +883,16 @@ def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str
         "size_hint must be a plain numeric account-equity ratio from 0 to 1, for example 0.02; "
         "do not include BTC, USDT, percent signs, units, ranges, or explanatory text in size_hint. "
         "leverage_hint must be a plain integer, for example 2; "
-        "do not include x, ranges, or explanatory text in leverage_hint.\n"
+        "do not include x, ranges, or explanatory text in leverage_hint. "
+        "Read sizing_constraints before choosing size_hint. Order notional is "
+        "account_equity * size_hint; leverage only changes the margin that notional "
+        "consumes, it does not increase exposure, so raising leverage_hint will not "
+        "make a small position larger. size_hint must be either 0 (with SKIP or HOLD) "
+        "or between min_viable_size_hint and max_size_hint inclusive. A size_hint "
+        "above 0 but below min_viable_size_hint produces an order under the exchange "
+        "minimum notional and is rejected outright, so it is strictly worse than SKIP. "
+        "If your conviction does not justify at least min_viable_size_hint, return SKIP. "
+        "If any_size_tradeable is false, no position is possible at this equity: return SKIP.\n"
         f"《上次决策记录》\n{previous_supervisor_decisions_json}\n"
         f"Long-term experience memory\n{json.dumps(prompt_long_term_memory, ensure_ascii=False, default=str)}\n"
         f"Memory usage\n{json.dumps(prompt_memory_usage, ensure_ascii=False, default=str)}\n"
