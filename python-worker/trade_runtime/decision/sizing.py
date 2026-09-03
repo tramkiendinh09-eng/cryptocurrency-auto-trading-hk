@@ -21,7 +21,12 @@ from typing import Any
 
 
 #: 模型没给 leverage_hint 时用的倍数。
-DEFAULT_LEVERAGE = 3.0
+DEFAULT_LEVERAGE = 5.0
+
+#: 允许的最低倍数。低于这个数的 leverage_hint 会被抬到这里——用户要的是
+#: 5-10 倍这个区间，1-4 倍不在选项里。这条会被更低的 ceiling 压过：配置
+#: 明确把上限设到 3，就不该因为这里写了 5 而反过来放大杠杆。
+MIN_LEVERAGE = 5.0
 
 #: 硬上限。运行时配置里的 maxLeverage 可以更低，但不能更高——
 #: 把这条写死在代码里，是为了让"配置写错一个零"不至于变成 100 倍杠杆。
@@ -65,15 +70,21 @@ def resolve_leverage(runtime_config: Any, decision: Any) -> float:
 
     模型给的 leverage_hint 只是建议：币安的杠杆是账户级状态，一个无界的
     建议不只是这一单下得不对，它会改掉该标的之后每一单的保证金模式。
-    所以一律夹在 [1, ceiling] 内；没给或给了非法值时退回默认倍数。
+    所以一律夹在 [MIN_LEVERAGE, ceiling] 内；没给或给了非法值时退回默认
+    倍数。
+
+    下界取 min(MIN_LEVERAGE, ceiling) 而不是直接取 MIN_LEVERAGE：配置若把
+    上限明确压到 5 以下，那是一个刻意的限制，不该被这里的下界顶开——否则
+    "调低上限"反而会调高实际杠杆。
     """
     raw = None
     if isinstance(decision, dict):
         raw = _optional_float(decision.get("leverage") or decision.get("leverage_hint"))
     ceiling = leverage_ceiling(runtime_config)
+    floor = min(MIN_LEVERAGE, ceiling)
     if raw is None or raw <= 0:
         raw = DEFAULT_LEVERAGE
-    return max(1.0, min(float(raw), ceiling))
+    return max(floor, min(float(raw), ceiling))
 
 
 def order_notional(account_equity: float, size_hint: float, leverage: float) -> float:

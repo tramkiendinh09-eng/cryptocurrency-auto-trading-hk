@@ -230,10 +230,27 @@ def _direction_from_liquidation_event(event: dict[str, Any], fallback: str = "ne
     return fallback
 
 
+#: 会被送去评估的 Wyckoff 就绪度。
+#:
+#: 原来只收 ready。ready 要求七项条件连续全过——成交量效果一致、高周期
+#: 不冲突、突破被确认、高周期确认、无诱多诱空、回踩站稳、未追高——任何
+#: 一项不满足就降级成 watch 然后被整条丢弃，模型连看都看不到。实测这就是
+#: 决策几乎恒为 SKIP 的主因：绝大多数 SKIP 的理由都是
+#: "Wyckoff status/readiness avoid"。
+#:
+#: watch 的含义是"结构成立，差一项确认"，那正是值得让模型看一眼再定夺的
+#: 情形，而不是应该在门口就拦掉的情形。最终开不开仓仍由模型判断。
+_DISPATCHABLE_READINESS = {"ready", "watch"}
+
+#: watch 的强度折算系数。它比 ready 弱是事实，不该同权重参与信号合成，
+#: 但打折之后仍要高于噪声，否则等于没放进来。
+_WATCH_STRENGTH_FACTOR = 0.8
+
+
 def _ready_wyckoff_shortterm_signal(feature_snapshot: dict[str, Any]) -> dict[str, Any] | None:
     """提取Wyckoff短期信号
 
-    从特征快照中提取有效的Wyckoff短期交易信号。
+    从特征快照中提取可供评估的Wyckoff短期交易信号（ready 或 watch）。
 
     Args:
         feature_snapshot: 特征快照
@@ -247,15 +264,23 @@ def _ready_wyckoff_shortterm_signal(feature_snapshot: dict[str, Any]) -> dict[st
     trigger = str(signal.get("trigger") or "").strip().lower()
     entry_bias = str(signal.get("entry_bias") or "").strip().lower()
     trade_readiness = str(signal.get("trade_readiness") or "").strip().lower()
-    if trigger in {"", "none"} or entry_bias not in {"bullish", "bearish"} or trade_readiness != "ready":
+    if (
+        trigger in {"", "none"}
+        or entry_bias not in {"bullish", "bearish"}
+        or trade_readiness not in _DISPATCHABLE_READINESS
+    ):
         return None
     confidence = _safe_float(signal.get("confidence"), 0.0)
     if confidence > 1.0:
         confidence = confidence / 100.0
+    strength_score = max(0.5, confidence)
+    if trade_readiness == "watch":
+        strength_score *= _WATCH_STRENGTH_FACTOR
     return {
         "direction": entry_bias,
         "trigger": trigger,
-        "strength_score": max(0.5, confidence),
+        "trade_readiness": trade_readiness,
+        "strength_score": strength_score,
     }
 
 
@@ -662,7 +687,12 @@ def _current_signals(
                 dispatch_mode="LLM_ALLOWED",
                 now=now,
                 signal_memory_policy=resolved_policy["signal_memory_policy"],
-                dedupe_key=f"market:wyckoff:{str(wyckoff_signal.get('trigger') or 'ready').strip().lower()}",
+                # 就绪度进 dedupe key：watch 升级成 ready 是一次新的、更强的
+                # 信号，不能被 5 分钟内那条 watch 去重掉。
+                dedupe_key=(
+                    f"market:wyckoff:{str(wyckoff_signal.get('trigger') or 'ready').strip().lower()}"
+                    f":{str(wyckoff_signal.get('trade_readiness') or 'ready').strip().lower()}"
+                ),
             )
         )
 

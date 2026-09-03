@@ -113,14 +113,19 @@ class TestSizingConstraintsUseTheSymbolsOwnFloor:
         sol = self._constraints("SOLUSDT", 100.0)
         assert eth["min_order_notional_usdt"] == pytest.approx(21.6)
         assert sol["min_order_notional_usdt"] == pytest.approx(5.0)
-        # 3 倍杠杆、100 USDT 权益：21.6/(100*3)=0.072，5/(100*3)=0.0167
-        assert eth["min_viable_size_hint"] == pytest.approx(0.072)
-        assert sol["min_viable_size_hint"] == pytest.approx(0.017)
+        # 5 倍杠杆、100 USDT 权益：21.6/(100*5)=0.0432，5/(100*5)=0.01
+        assert eth["min_viable_size_hint"] == pytest.approx(0.044)
+        assert sol["min_viable_size_hint"] == pytest.approx(0.010)
 
     def test_the_old_global_constant_would_have_understated_eth_by_4x(self, venue):
-        """回归守卫：这正是上线时丢掉两笔 ETH 信号的那个数。"""
+        """回归守卫：这正是上线时丢掉两笔 ETH 信号的那个数。
+
+        断言写成"相对 SOL 的倍数"而不是一个硬编码常量，这样杠杆策略再变
+        也不会把这条守卫变成一句空话。
+        """
         eth = self._constraints("ETHUSDT", 2400.0)
-        assert eth["min_viable_size_hint"] > 0.017 * 4
+        sol = self._constraints("SOLUSDT", 100.0)
+        assert eth["min_viable_size_hint"] > sol["min_viable_size_hint"] * 4
 
     def test_constraints_say_which_symbol_and_where_the_number_came_from(self, venue):
         eth = self._constraints("ETHUSDT", 2400.0)

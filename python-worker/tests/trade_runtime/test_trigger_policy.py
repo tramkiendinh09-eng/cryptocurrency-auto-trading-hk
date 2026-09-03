@@ -257,7 +257,7 @@ def test_trigger_policy_escalates_ready_wyckoff_shortterm_signal_to_llm_allowed(
     assert len(decision["selected_agents"]) >= 2
 
 
-def test_trigger_policy_does_not_escalate_wyckoff_watch_signal():
+def test_trigger_policy_escalates_wyckoff_watch_signal_for_evaluation():
     decision = evaluate_trigger_policy(
         event_bundle=[{"event_type": "market_tick", "symbol": "ETHUSDT", "price": 2285.0}],
         feature_snapshot={
@@ -283,9 +283,59 @@ def test_trigger_policy_does_not_escalate_wyckoff_watch_signal():
         now=datetime(2026, 4, 17, 8, 1, tzinfo=timezone.utc),
     )
 
-    assert decision["dispatch_mode"] == "NO_DISPATCH"
-    assert decision["llm_allowed"] is False
-    assert not any(item["signal_type"] == "wyckoff_shortterm" for item in decision["active_signals"])
+    # 曾经这里是 NO_DISPATCH：ready 要七项条件连续全过，差一项就降级成
+    # watch 然后被整条丢掉，模型连看都看不到。实测这是决策几乎恒为 SKIP
+    # 的主因——绝大多数 SKIP 的理由都是 "Wyckoff status/readiness avoid"。
+    # watch 的含义是"结构成立，差一项确认"，那正该让模型看一眼再定夺。
+    assert decision["dispatch_mode"] == "LLM_ALLOWED"
+    assert decision["llm_allowed"] is True
+    assert any(item["signal_type"] == "wyckoff_shortterm" for item in decision["active_signals"])
+
+
+def test_wyckoff_watch_carries_less_weight_than_ready():
+    """watch 比 ready 弱是事实，放进来不等于同权重。"""
+    from trade_runtime.trigger_policy import _ready_wyckoff_shortterm_signal
+
+    base = {
+        "phase": "markup",
+        "entry_bias": "bullish",
+        "trigger": "breakout_long",
+        "confidence": 0.75,
+    }
+    ready = _ready_wyckoff_shortterm_signal({"wyckoff_shortterm": {**base, "trade_readiness": "ready"}})
+    watch = _ready_wyckoff_shortterm_signal({"wyckoff_shortterm": {**base, "trade_readiness": "watch"}})
+    assert ready is not None and watch is not None
+    assert watch["strength_score"] < ready["strength_score"]
+    # 打折之后仍要高于噪声，否则等于没放进来
+    assert watch["strength_score"] > 0.5
+    assert watch["trade_readiness"] == "watch"
+
+
+def test_wyckoff_avoid_is_still_dropped():
+    """放宽到 watch 不等于什么都收：avoid 是"结构本身不成立"。"""
+    from trade_runtime.trigger_policy import _ready_wyckoff_shortterm_signal
+
+    assert _ready_wyckoff_shortterm_signal(
+        {
+            "wyckoff_shortterm": {
+                "phase": "range",
+                "entry_bias": "bullish",
+                "trigger": "breakout_long",
+                "trade_readiness": "avoid",
+                "confidence": 0.58,
+            }
+        }
+    ) is None
+
+
+def test_wyckoff_watch_and_ready_are_not_deduped_into_one():
+    """watch 升级成 ready 是一次新的、更强的信号，不能被前一条 watch 去重掉。"""
+    from trade_runtime.trigger_policy import _ready_wyckoff_shortterm_signal
+
+    base = {"phase": "markup", "entry_bias": "bullish", "trigger": "breakout_long", "confidence": 0.75}
+    ready = _ready_wyckoff_shortterm_signal({"wyckoff_shortterm": {**base, "trade_readiness": "ready"}})
+    watch = _ready_wyckoff_shortterm_signal({"wyckoff_shortterm": {**base, "trade_readiness": "watch"}})
+    assert ready["trade_readiness"] != watch["trade_readiness"]
 
 
 def test_resolve_trigger_policy_merges_runtime_defaults_and_strategy_overrides():

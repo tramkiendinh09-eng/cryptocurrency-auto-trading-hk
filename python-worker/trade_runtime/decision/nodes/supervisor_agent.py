@@ -71,6 +71,7 @@ from trade_runtime.decision.llm_agent_runner import record_llm_error
 from trade_runtime.decision.models import SupervisorDecision
 from trade_runtime.decision.sizing import (
     DEFAULT_LEVERAGE,
+    MIN_LEVERAGE,
     leverage_ceiling,
     min_viable_size_hint,
     venue_order_floor,
@@ -759,6 +760,7 @@ def _sizing_constraints(state: DecisionState, runtime_config: dict) -> dict:
     max_ratio = _safe_float(runtime_config.get("max_position_ratio"), 0.0)
     ceiling = leverage_ceiling(runtime_config)
     default_leverage = min(DEFAULT_LEVERAGE, ceiling)
+    floor_leverage = min(MIN_LEVERAGE, ceiling)
 
     price = _current_market_price(state)
     min_notional, notional_step, notional_source = venue_order_floor(
@@ -782,6 +784,9 @@ def _sizing_constraints(state: DecisionState, runtime_config: dict) -> dict:
         "margin_formula": "account_equity * size_hint",
         "leverage_scales_exposure": True,
         "default_leverage": int(default_leverage),
+        # 低于这个倍数的 leverage_hint 会被抬上来，所以直接告诉模型区间，
+        # 免得它给出一个会被悄悄改掉的值。
+        "min_leverage": int(floor_leverage),
         "max_leverage": int(ceiling),
         "min_order_notional_usdt": round(min_notional, 4),
         # 这个下限是这个标的自己的，不是全局值——各标的能差四倍以上。
@@ -917,9 +922,11 @@ def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str
         "never carry a size over from another symbol. Fills truncate down to a whole "
         "multiple of notional_step_usdt, so exposure landing just under a step is paid "
         "for in margin but never opened; aim at a multiple. leverage_hint must be an "
-        "integer between 1 and max_leverage; omit it to use default_leverage. Choose "
-        "leverage for the setup, not to satisfy the minimum — if the only way to clear "
-        "the floor is leverage you would not otherwise take, return SKIP. "
+        "integer between min_leverage and max_leverage; omit it to use default_leverage. "
+        "Values below min_leverage are raised to it, so pick within the range rather "
+        "than under it. Choose leverage for the setup, not to satisfy the minimum "
+        "notional — if the only way to clear the floor is leverage you would not "
+        "otherwise take, return SKIP. "
         "If any_size_tradeable is false, no position is possible at this equity even at "
         "max_leverage: return SKIP.\n"
         f"《上次决策记录》\n{previous_supervisor_decisions_json}\n"

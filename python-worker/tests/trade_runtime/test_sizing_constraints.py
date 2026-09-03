@@ -12,6 +12,7 @@ import pytest
 from trade_runtime.decision.sizing import (
     DEFAULT_LEVERAGE,
     LEVERAGE_HARD_CEILING,
+    MIN_LEVERAGE,
     leverage_ceiling,
     min_viable_size_hint,
     order_notional,
@@ -22,31 +23,42 @@ from trade_runtime.risk.guard import RiskGuard
 
 
 class TestResolveLeverage:
-    def test_defaults_to_three_when_model_says_nothing(self):
-        assert resolve_leverage({"maxLeverage": 10}, {}) == 3.0
-        assert DEFAULT_LEVERAGE == 3.0
+    def test_defaults_to_five_when_model_says_nothing(self):
+        assert resolve_leverage({"maxLeverage": 10}, {}) == 5.0
+        assert DEFAULT_LEVERAGE == 5.0
 
-    def test_model_hint_is_honoured_within_the_ceiling(self):
-        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": 5}) == 5.0
+    def test_model_hint_is_honoured_within_the_range(self):
+        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": 7}) == 7.0
 
     def test_hint_above_ceiling_is_clamped(self):
         assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": 50}) == 10.0
 
     def test_config_ceiling_below_hard_ceiling_wins(self):
-        assert resolve_leverage({"maxLeverage": 4}, {"leverage_hint": 9}) == 4.0
+        assert resolve_leverage({"maxLeverage": 8}, {"leverage_hint": 9}) == 8.0
+
+    def test_a_ceiling_below_the_floor_still_wins(self):
+        """配置把上限压到 5 以下是一个刻意的限制，不该被 MIN_LEVERAGE 顶开
+        ——否则"调低上限"反而会调高实际杠杆。"""
+        assert resolve_leverage({"maxLeverage": 3}, {"leverage_hint": 9}) == 3.0
+        assert resolve_leverage({"maxLeverage": 3}, {}) == 3.0
 
     def test_config_above_hard_ceiling_is_capped(self):
         """配置写错一个零，不该变成 100 倍杠杆。"""
         assert leverage_ceiling({"maxLeverage": 100}) == LEVERAGE_HARD_CEILING
         assert resolve_leverage({"maxLeverage": 100}, {"leverage_hint": 100}) == 10.0
 
-    def test_never_below_one(self):
-        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": 0}) == 3.0
-        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": -2}) == 3.0
+    def test_never_below_the_floor(self):
+        """用户要的是 5-10 这个区间，1-4 倍不在选项里。"""
+        assert MIN_LEVERAGE == 5.0
+        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": 0}) == 5.0
+        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": -2}) == 5.0
+        # 区间下方的合法数值会被抬到下界，而不是照单全收
+        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": 2}) == 5.0
+        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": 1}) == 5.0
 
     def test_garbage_hint_falls_back_to_default(self):
-        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": "abc"}) == 3.0
-        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": None}) == 3.0
+        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": "abc"}) == 5.0
+        assert resolve_leverage({"maxLeverage": 10}, {"leverage_hint": None}) == 5.0
 
     def test_missing_config_falls_back_to_the_conservative_default(self):
         """读不到配置时不能放开到硬上限——那等于"配置丢了反而敢加杠杆"。
@@ -81,7 +93,7 @@ class TestMinViableSizeHint:
 
 
 class TestSizingConstraints:
-    def _c(self, equity=100.0, ratio=0.3, max_lev=10):
+    def _c(self, equity=100.0, ratio=0.8, max_lev=10):
         return _sizing_constraints(
             {"account_equity": equity},
             {"max_position_ratio": ratio, "maxLeverage": max_lev},
@@ -95,33 +107,41 @@ class TestSizingConstraints:
 
     def test_default_and_ceiling_are_surfaced(self):
         c = self._c()
-        assert c["default_leverage"] == 3
+        assert c["default_leverage"] == 5
+        assert c["min_leverage"] == 5
         assert c["max_leverage"] == 10
 
     def test_floor_uses_default_leverage_and_drops_at_max(self):
         c = self._c()
-        assert c["min_viable_size_hint"] == 0.017
+        # 5 USDT 兜底下限 / (100 权益 × 5 倍) = 0.01
+        assert c["min_viable_size_hint"] == 0.010
         assert c["min_viable_size_hint_at_max_leverage"] == 0.005
 
     def test_the_size_that_was_rejected_before_is_now_viable(self):
         """线上那次 OPEN_SHORT 给的是 0.04：无杠杆时 4 USDT 敞口不够
-        交易所最小下单额，3 倍杠杆下是 12 USDT，可以下。"""
+        交易所最小下单额，5 倍杠杆下是 20 USDT，可以下。"""
         c = self._c()
         assert 0.04 >= c["min_viable_size_hint"]
-        assert order_notional(100.0, 0.04, c["default_leverage"]) == 12.0
+        assert order_notional(100.0, 0.04, c["default_leverage"]) == 20.0
 
     def test_max_size_hint_caps_margin_not_exposure(self):
         c = self._c()
-        assert c["max_size_hint"] == 0.3
+        assert c["max_size_hint"] == 0.8
+        # 上限约束的是保证金：80% 权益 × 5 倍 = 4 倍权益的敞口
+        assert order_notional(100.0, c["max_size_hint"], 5.0) == 400.0
 
     def test_tiny_account_is_not_tradeable_even_at_max_leverage(self):
-        c = self._c(equity=1.0)
+        # 0.5 USDT 权益：10 倍下也要 1.0 的 size_hint 才够到 5 USDT 最小
+        # 下单额，超过 0.8 的仓位上限。
+        c = self._c(equity=0.5)
         assert c["any_size_tradeable"] is False
 
     def test_ceiling_from_config_is_respected(self):
+        """上限低于默认倍数时，默认倍数被压下来而不是反过来。"""
         c = self._c(max_lev=4)
         assert c["max_leverage"] == 4
-        assert c["default_leverage"] == 3
+        assert c["default_leverage"] == 4
+        assert c["min_leverage"] == 4
 
     def test_config_ceiling_below_default_lowers_the_default(self):
         c = self._c(max_lev=2)
@@ -196,16 +216,16 @@ class TestLeverageReachesTheWorker:
 
     def test_absent_flag_falls_back_to_default(self):
         dumped = self._config("{}")
-        assert dumped["max_leverage"] == 3.0
-        assert leverage_ceiling(dumped) == 3.0
+        assert dumped["max_leverage"] == 5.0
+        assert leverage_ceiling(dumped) == 5.0
 
     def test_end_to_end_default_and_ceiling(self):
         dumped = self._config('{"maxLeverage": 10}')
-        assert resolve_leverage(dumped, {}) == 3.0
+        assert resolve_leverage(dumped, {}) == 5.0
         assert resolve_leverage(dumped, {"leverage_hint": 8}) == 8.0
         assert resolve_leverage(dumped, {"leverage_hint": 50}) == 10.0
 
     def test_garbage_value_falls_back_rather_than_raising(self):
-        assert self._config('{"maxLeverage": "abc"}')["max_leverage"] == 3.0
-        assert self._config('{"maxLeverage": 0}')["max_leverage"] == 3.0
-        assert self._config('{"maxLeverage": -5}')["max_leverage"] == 3.0
+        assert self._config('{"maxLeverage": "abc"}')["max_leverage"] == 5.0
+        assert self._config('{"maxLeverage": 0}')["max_leverage"] == 5.0
+        assert self._config('{"maxLeverage": -5}')["max_leverage"] == 5.0
