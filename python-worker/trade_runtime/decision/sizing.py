@@ -21,16 +21,23 @@ from typing import Any
 
 
 #: 模型没给 leverage_hint 时用的倍数。
-DEFAULT_LEVERAGE = 5.0
+DEFAULT_LEVERAGE = 6.0
 
 #: 允许的最低倍数。低于这个数的 leverage_hint 会被抬到这里——用户要的是
-#: 5-10 倍这个区间，1-4 倍不在选项里。这条会被更低的 ceiling 压过：配置
-#: 明确把上限设到 3，就不该因为这里写了 5 而反过来放大杠杆。
-MIN_LEVERAGE = 5.0
+#: 6-12 倍这个区间，1-5 倍不在选项里。这条会被更低的 ceiling 压过：配置
+#: 明确把上限设到 3，就不该因为这里写了 6 而反过来放大杠杆。
+MIN_LEVERAGE = 6.0
 
 #: 硬上限。运行时配置里的 maxLeverage 可以更低，但不能更高——
 #: 把这条写死在代码里，是为了让"配置写错一个零"不至于变成 100 倍杠杆。
-LEVERAGE_HARD_CEILING = 10.0
+LEVERAGE_HARD_CEILING = 12.0
+
+#: 开仓时 size_hint 的下界，口径同 size_hint 本身：动用多少比例的权益作为
+#: 保证金。设这条的理由和 MIN_LEVERAGE 完全一样——模型一直贴着交易所最小
+#: 下单额给量（实测落在 0.02~0.03，而上限是 0.80），于是杠杆调多少都看不出
+#: 区别，敞口始终是十几 USDT。下界只对开仓生效：平仓与减仓的 size_hint 语义
+#: 是平掉多少，抬高它就变成了强行加仓。
+DEFAULT_MIN_POSITION_RATIO = 0.05
 
 
 def _optional_float(value: Any) -> float | None:
@@ -63,6 +70,31 @@ def leverage_ceiling(runtime_config: Any) -> float:
     if ceiling is None or ceiling <= 0:
         return DEFAULT_LEVERAGE
     return min(float(ceiling), LEVERAGE_HARD_CEILING)
+
+
+def position_ratio_floor(runtime_config: Any, max_position_ratio: float) -> float:
+    """取开仓时 size_hint 的下界。
+
+    配置里的 ``minPositionRatio`` 覆盖默认值，读不到就用默认值。
+
+    夹在 max_position_ratio 之内的理由与 resolve_leverage 里那条相同：上限是
+    刻意设下的限制，不该被这里的下界顶开，否则调低仓位上限反而会调高实际
+    仓位。上限本身为 0（即禁止开仓）时下界也是 0。
+    """
+    ceiling = max(float(max_position_ratio or 0.0), 0.0)
+    if ceiling <= 0:
+        return 0.0
+    floor = None
+    if isinstance(runtime_config, dict):
+        raw = (
+            runtime_config.get("min_position_ratio")
+            if runtime_config.get("min_position_ratio") is not None
+            else runtime_config.get("minPositionRatio")
+        )
+        floor = _optional_float(raw)
+    if floor is None or floor < 0:
+        floor = DEFAULT_MIN_POSITION_RATIO
+    return min(float(floor), ceiling)
 
 
 def resolve_leverage(runtime_config: Any, decision: Any) -> float:

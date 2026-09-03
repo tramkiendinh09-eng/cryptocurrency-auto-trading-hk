@@ -2068,6 +2068,9 @@ def test_supervisor_model_decision_accepts_numeric_fields_with_units():
         "mode": "paper",
         "effective_mode": "paper",
         "dispatch_mode": "LLM_ALLOWED",
+        # 关掉 size_hint 下界，这条测的是"带单位的字符串能不能解析成数值"，
+        # 不是夹持——下界另有 TestPositionRatioFloor 守着。
+        "runtime_config": {"minPositionRatio": 0},
         "decision_model_client": StubDecisionModelClient(),
         "strategy_context": {"ai_model_config": {"id": 8, "model_code": "gpt-5.5", "provider": "openai"}},
         "market_view": {"bias": "bullish", "confidence": 70, "reason": "breakout"},

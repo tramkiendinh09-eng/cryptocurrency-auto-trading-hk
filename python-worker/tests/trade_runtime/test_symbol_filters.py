@@ -254,11 +254,11 @@ def test_leverage_hint_is_capped_by_runtime_config():
     """leverage_hint is model output; unbounded it can set 50x on the account."""
     from trade_runtime.decision.nodes.execution_node import _resolve_leverage
 
-    state = {"runtime_config": {"max_leverage": 10}}
-    assert _resolve_leverage(state, {"leverage_hint": 50}) == pytest.approx(10.0)
+    state = {"runtime_config": {"max_leverage": 12}}
+    assert _resolve_leverage(state, {"leverage_hint": 50}) == pytest.approx(12.0)
     assert _resolve_leverage(state, {"leverage_hint": 7}) == pytest.approx(7.0)
-    # 区间下方的建议被抬到下界（5），而不是照单全收
-    assert _resolve_leverage(state, {"leverage_hint": 2}) == pytest.approx(5.0)
+    # 区间下方的建议被抬到下界（6），而不是照单全收
+    assert _resolve_leverage(state, {"leverage_hint": 2}) == pytest.approx(6.0)
 
 
 def test_leverage_falls_back_to_conservative_default():

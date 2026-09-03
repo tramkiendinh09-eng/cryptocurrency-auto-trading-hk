@@ -74,6 +74,7 @@ from trade_runtime.decision.sizing import (
     MIN_LEVERAGE,
     leverage_ceiling,
     min_viable_size_hint,
+    position_ratio_floor,
     venue_order_floor,
 )
 from trade_runtime.decision.output_parsers import parse_json_object_content
@@ -273,16 +274,30 @@ def _remaining_position_headroom(state: DecisionState) -> float:
     return max(0.0, _max_position_ratio(state) - (current_position_notional / account_equity))
 
 
+def _apply_size_floor(state: DecisionState, size_hint: float, ceiling: float) -> float:
+    """把建仓的 size_hint 夹进 [下界, 上限]。
+
+    只抬高大于 0 的值：OPEN 配 size_hint=0 是自相矛盾的输入，保守的读法是
+    模型并不想建仓，不该由这里凭空造出一个仓位来——和 leverage_hint 给 0
+    时退回默认倍数不同，那一档没有“不开”这个含义。
+    """
+    bounded = min(max(float(size_hint or 0.0), 0.0), max(float(ceiling or 0.0), 0.0))
+    if bounded <= 0:
+        return bounded
+    floor = position_ratio_floor(state.get("runtime_config") or {}, ceiling)
+    return max(bounded, floor)
+
+
 def _clamp_size_hint(state: DecisionState, decision_payload: dict) -> dict:
     payload = dict(decision_payload or {})
     action = str(payload.get("action") or "").strip().upper()
     side = str(payload.get("side") or "").strip().lower()
     size_hint = max(0.0, _safe_float(payload.get("size_hint"), 0.0))
     if action in {"OPEN_LONG", "OPEN_SHORT"}:
-        payload["size_hint"] = min(size_hint, _max_position_ratio(state))
+        payload["size_hint"] = _apply_size_floor(state, size_hint, _max_position_ratio(state))
         return payload
     if action in {"ADD_LONG", "ADD_SHORT"}:
-        payload["size_hint"] = min(size_hint, _remaining_position_headroom(state))
+        payload["size_hint"] = _apply_size_floor(state, size_hint, _remaining_position_headroom(state))
         if payload["size_hint"] <= 0:
             payload["action"] = "HOLD"
             payload["side"] = side or ("long" if action == "ADD_LONG" else "short")
@@ -794,6 +809,9 @@ def _sizing_constraints(state: DecisionState, runtime_config: dict) -> dict:
         "min_order_notional_source": notional_source,
         # 成交数量按步进向下截断，所以下单额落在步进整数倍上才不浪费保证金。
         "notional_step_usdt": round(notional_step, 4) if notional_step > 0 else None,
+        # 低于这个比例的 size_hint 会被抬上来，理由同 min_leverage：
+        # 与其让模型给一个会被悄悄改掉的值，不如直接把区间告诉它。
+        "min_size_hint": position_ratio_floor(runtime_config, max_ratio),
         "min_viable_size_hint": min_size_hint,
         "min_viable_size_hint_at_max_leverage": floor_at_max_leverage,
         "max_size_hint": max_ratio or None,
@@ -905,15 +923,16 @@ def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str
         "invalidation must never be N/A, none, null, or empty. "
         "For volume-price and Wyckoff judgment, prioritize kline_context.period_summaries with source=kline_ohlcv, "
         "quote_volume_sum, quote_volume_ratio, and volume_price_signals; do not treat ticker 24h cumulative volume as bar volume confirmation. "
-        "size_hint must be a plain numeric account-equity ratio from 0 to 1, for example 0.02; "
+        "size_hint must be a plain numeric account-equity ratio from 0 to 1, such as 0.08; "
         "do not include BTC, USDT, percent signs, units, ranges, or explanatory text in size_hint. "
-        "leverage_hint must be a plain integer, for example 2; "
+        "leverage_hint must be a plain integer, such as 8; "
         "do not include x, ranges, or explanatory text in leverage_hint. "
         "Read sizing_constraints before choosing size_hint and leverage_hint. "
         "size_hint is the fraction of account equity committed as margin; exposure is "
         "account_equity * size_hint * leverage_hint, so leverage does increase position "
-        "size. size_hint must be either 0 (with SKIP or HOLD) or at most max_size_hint, "
-        "which caps margin, not exposure. Exposure must also clear the exchange minimum "
+        "size. size_hint must be either 0 (with SKIP or HOLD) or between min_size_hint "
+        "and max_size_hint, which cap margin, not exposure. Values below min_size_hint are "
+        "raised to it, so pick within the range rather than under it. Exposure must also clear the exchange minimum "
         "notional: at default_leverage that means size_hint of at least "
         "min_viable_size_hint, and raising leverage_hint lowers that floor down to "
         "min_viable_size_hint_at_max_leverage. An order below the minimum notional is "

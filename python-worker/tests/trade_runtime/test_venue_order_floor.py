@@ -106,26 +106,29 @@ class TestSizingConstraintsUseTheSymbolsOwnFloor:
 
     def _constraints(self, symbol, price, equity=100.0):
         state = {"symbol": symbol, "account_equity": equity, "feature_snapshot": {"price": price}}
-        return _sizing_constraints(state, {"max_position_ratio": 0.3, "maxLeverage": 10})
+        return _sizing_constraints(state, {"max_position_ratio": 0.3, "maxLeverage": 12})
 
     def test_eth_demands_a_much_larger_hint_than_sol(self, venue):
         eth = self._constraints("ETHUSDT", 2400.0)
         sol = self._constraints("SOLUSDT", 100.0)
         assert eth["min_order_notional_usdt"] == pytest.approx(21.6)
         assert sol["min_order_notional_usdt"] == pytest.approx(5.0)
-        # 5 倍杠杆、100 USDT 权益：21.6/(100*5)=0.0432，5/(100*5)=0.01
-        assert eth["min_viable_size_hint"] == pytest.approx(0.044)
-        assert sol["min_viable_size_hint"] == pytest.approx(0.010)
+        # 6 倍杠杆、100 USDT 权益：21.6/(100*6)=0.036，5/(100*6)=0.0083
+        assert eth["min_viable_size_hint"] == pytest.approx(0.036)
+        assert sol["min_viable_size_hint"] == pytest.approx(0.009)
 
     def test_the_old_global_constant_would_have_understated_eth_by_4x(self, venue):
         """回归守卫：这正是上线时丢掉两笔 ETH 信号的那个数。
 
         断言写成"相对 SOL 的倍数"而不是一个硬编码常量，这样杠杆策略再变
-        也不会把这条守卫变成一句空话。
+        也不会把这条守卫变成一句空话。倍数关系落在 min_order_notional 上：
+        size_hint 那一侧要向上取整到三位小数，SOL 这种很小的值被取整抬高的
+        比例更大（0.0083→0.009），杠杆越高、两者的比值被压得越扁。
         """
         eth = self._constraints("ETHUSDT", 2400.0)
         sol = self._constraints("SOLUSDT", 100.0)
-        assert eth["min_viable_size_hint"] > sol["min_viable_size_hint"] * 4
+        assert eth["min_order_notional_usdt"] > sol["min_order_notional_usdt"] * 4
+        assert eth["min_viable_size_hint"] > sol["min_viable_size_hint"] * 3
 
     def test_constraints_say_which_symbol_and_where_the_number_came_from(self, venue):
         eth = self._constraints("ETHUSDT", 2400.0)
@@ -137,7 +140,8 @@ class TestSizingConstraintsUseTheSymbolsOwnFloor:
         """杠杆越高、够到最小下单额需要的保证金越少——小账户的入场全靠这个。"""
         eth = self._constraints("ETHUSDT", 2400.0)
         assert eth["min_viable_size_hint_at_max_leverage"] < eth["min_viable_size_hint"]
-        assert eth["min_viable_size_hint_at_max_leverage"] == pytest.approx(0.022)
+        # 12 倍上限下 21.6/(100*12) = 0.018
+        assert eth["min_viable_size_hint_at_max_leverage"] == pytest.approx(0.018)
 
     def test_symbol_too_expensive_for_the_account_is_flagged_untradeable(self, venue):
         """够不到就得明说，让模型直接 SKIP，而不是给一个必被拒的仓位。"""

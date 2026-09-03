@@ -903,9 +903,9 @@ def test_execution_node_emits_paper_trade_order_callback_in_paper_mode():
 
     assert state["execution_result"]["status"] == "filled"
     assert callback_client.paper_trade_order_payloads[0]["traceId"] == "t-paper-1"
-    # 敞口 = 权益 × size_hint × 杠杆。模型没给 leverage_hint，用默认 5 倍，
-    # 所以是不带杠杆时 3500 的五倍——杠杆真正参与仓位计算。
-    assert callback_client.paper_trade_order_payloads[0]["quoteAmount"] == 17500.0
+    # 敞口 = 权益 × size_hint × 杠杆。模型没给 leverage_hint，用默认 6 倍，
+    # 所以是不带杠杆时 3500 的六倍——杠杆真正参与仓位计算。
+    assert callback_client.paper_trade_order_payloads[0]["quoteAmount"] == 21000.0
     assert callback_client.paper_trade_order_payloads[0]["orderRef"] == "paper-BTCUSDT"
     assert callback_client.paper_trade_order_payloads[0]["executionStatus"] == "filled"
     assert callback_client.paper_trade_order_payloads[0]["orderStatus"] == "FILLED"
@@ -1456,8 +1456,8 @@ def test_graph_executes_paper_order_after_risk_passes():
     assert result["execution_result"]["status"] == "filled"
     assert result["execution_result"]["order_id"] == "paper-BTCUSDT"
     assert callback_client.order_payloads[0]["traceId"] == "t-4"
-    # 同上：默认 5 倍杠杆下敞口是保证金的五倍。
-    assert callback_client.order_payloads[0]["quoteAmount"] == 17500.0
+    # 同上：默认 6 倍杠杆下敞口是保证金的六倍。
+    assert callback_client.order_payloads[0]["quoteAmount"] == 21000.0
     assert callback_client.exchange_order_payloads[0]["orderRef"] == "paper-BTCUSDT"
     assert callback_client.exchange_order_payloads[0]["status"] == "filled"
     assert callback_client.exchange_order_payloads[0]["executionStatus"] == "filled"
