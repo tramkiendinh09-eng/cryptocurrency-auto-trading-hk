@@ -39,9 +39,22 @@ router.beforeEach((to, from, next) => {
         useUserStore().getInfo().then(() => {
           isRelogin.show = false
           return usePermissionStore().generateRoutes().then(accessRoutes => {
+            // One rejected route must not cost the user the whole console.
+            // vue-router throws on a duplicate route name, so a menu whose path
+            // collides with an existing one (e.g. a second "monitor") used to
+            // abort this loop, land in the catch below, and log the user out —
+            // an unusable app because of one bad row in sys_menu.
             accessRoutes.forEach(route => {
-              if (!isHttp(route.path)) {
+              if (isHttp(route.path)) {
+                return
+              }
+              try {
                 router.addRoute(route)
+              } catch (err) {
+                console.error(
+                  `[permission] 菜单路由注册失败 path="${route.path}" name="${route.name}"，已跳过该分组`,
+                  err
+                )
               }
             })
             next({ ...to, replace: true })

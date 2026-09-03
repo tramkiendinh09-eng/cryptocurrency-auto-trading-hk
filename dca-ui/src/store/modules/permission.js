@@ -33,23 +33,33 @@ const usePermissionStore = defineStore(
         this.sidebarRouters = routes
       },
       generateRoutes(roles) {
-        return new Promise(resolve => {
-          // 向后端请求路由数据
+        // This promise previously had no reject path and no catch on
+        // getRouters(). Anything that threw in here — a menu whose component
+        // could not be resolved, a failed addRoute — left it pending forever.
+        // The router guard then never called next(), so navigation hung and the
+        // loading overlay stayed up with nothing on screen to explain it.
+        // A visible failure is always better than a silent one.
+        return new Promise((resolve, reject) => {
           getRouters().then(res => {
-            const sdata = JSON.parse(JSON.stringify(res.data))
-            const rdata = JSON.parse(JSON.stringify(res.data))
-            const defaultData = JSON.parse(JSON.stringify(res.data))
-            const sidebarRoutes = filterAsyncRouter(sdata)
-            const rewriteRoutes = filterAsyncRouter(rdata, false, true)
-            const defaultRoutes = filterAsyncRouter(defaultData)
-            const asyncRoutes = filterDynamicRoutes(dynamicRoutes)
-            asyncRoutes.forEach(route => { router.addRoute(route) })
-            this.setRoutes(rewriteRoutes)
-            this.setSidebarRouters(constantRoutes.concat(sidebarRoutes))
-            this.setDefaultRoutes(sidebarRoutes)
-            this.setTopbarRoutes(defaultRoutes)
-            resolve(rewriteRoutes)
-          })
+            try {
+              const sdata = JSON.parse(JSON.stringify(res.data))
+              const rdata = JSON.parse(JSON.stringify(res.data))
+              const defaultData = JSON.parse(JSON.stringify(res.data))
+              const sidebarRoutes = filterAsyncRouter(sdata)
+              const rewriteRoutes = filterAsyncRouter(rdata, false, true)
+              const defaultRoutes = filterAsyncRouter(defaultData)
+              const asyncRoutes = filterDynamicRoutes(dynamicRoutes)
+              asyncRoutes.forEach(route => { router.addRoute(route) })
+              this.setRoutes(rewriteRoutes)
+              this.setSidebarRouters(constantRoutes.concat(sidebarRoutes))
+              this.setDefaultRoutes(sidebarRoutes)
+              this.setTopbarRoutes(defaultRoutes)
+              resolve(rewriteRoutes)
+            } catch (err) {
+              console.error('[permission] 生成路由失败', err)
+              reject(err)
+            }
+          }).catch(reject)
         })
       }
     }
@@ -120,6 +130,13 @@ export const loadView = (view) => {
     if (dir === view) {
       res = () => modules[path]()
     }
+  }
+  if (!res) {
+    // Returning undefined here makes router.addRoute throw, which used to take
+    // the whole application down over a single mistyped menu component. Degrade
+    // to one broken page instead, and say which menu caused it.
+    console.error(`[permission] 菜单组件无法解析: "${view}"，该页面将显示 404`)
+    return () => import('@/views/error/404')
   }
   return res
 }

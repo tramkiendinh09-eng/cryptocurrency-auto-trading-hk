@@ -357,4 +357,13 @@ CREATE TABLE `sys_user_role` (
   PRIMARY KEY (`user_id`, `role_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+DROP TABLE IF EXISTS `sys_notice_read`;
+CREATE TABLE `sys_notice_read` (
+  `notice_id` bigint NOT NULL,
+  `user_id` bigint NOT NULL,
+  `read_time` datetime NULL DEFAULT NULL,
+  PRIMARY KEY (`notice_id`, `user_id`) USING BTREE,
+  INDEX `idx_sys_notice_read_user_id`(`user_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

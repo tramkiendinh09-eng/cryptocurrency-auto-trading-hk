@@ -18,7 +18,7 @@
         </div>
 
         <div class="hero-copy">
-          <p class="hero-kicker">Signal ? Decision ? Execution</p>
+          <p class="hero-kicker">Signal · Decision · Execution</p>
           <h3>让交易系统保持清醒、有序、可追踪</h3>
           <p class="hero-desc">
             面向 AI 辅助交易的轻量控制台，聚合行情状态、决策记录、风险阻断与执行链路。
@@ -152,6 +152,7 @@
 </template>
 
 <script setup>
+import { ElMessage } from "element-plus"
 import { getCodeImg } from "@/api/login"
 import Cookies from "js-cookie"
 import { encrypt, decrypt } from "@/utils/jsencrypt"
@@ -210,7 +211,18 @@ function handleLogin() {
           }
           return acc
         }, {})
-        router.push({ path: redirect.value || "/", query: otherQueryParams })
+        // router.push resolves once the guard settles. If route generation
+        // fails the guard rejects, and without this the overlay would sit on
+        // "正在验证" forever with no error shown.
+        return router.push({ path: redirect.value || "/", query: otherQueryParams })
+          .catch(err => {
+            loading.value = false
+            const message = err && err.message ? err.message : "打开工作台失败"
+            ElMessage.error(`登录成功但工作台加载失败：${message}`)
+            if (captchaEnabled.value) {
+              getCode()
+            }
+          })
       }).catch(() => {
         loading.value = false
         if (captchaEnabled.value) {
