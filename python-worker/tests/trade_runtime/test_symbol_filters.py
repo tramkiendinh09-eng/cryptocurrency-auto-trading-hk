@@ -386,3 +386,77 @@ def test_paper_fill_unaffected_for_other_venues(filters, monkeypatch):
     )
     assert result["status"] == "filled"
     assert result["fill_quantity"] > 0
+
+
+class TestMinimumTradableSize:
+    """最小下单额是逐标的的，不是一个全局常量。
+
+    此前 sizing 用一个写死的 5 USDT 当所有标的的下限，于是模型给 ETH 定了
+    10 和 15 USDT 两单——都在它以为的合法区间内，都被交易所拒掉。
+    """
+
+    def test_floor_is_set_by_min_notional_when_that_binds(self, filters):
+        # ETH 的 20 USDT 最小名义金额远高于 0.001 的步进在该价位的价值，
+        # 所以是它决定下限：20/2400 = 0.00833 ETH，向上取到 0.009 的步进，
+        # 于是真实下限是 21.6 而不是 20——够不到步进就凑不出合法数量。
+        floor = filters.get("ETHUSDT").min_tradable_notional(2400.0)
+        assert float(floor) == pytest.approx(21.6)
+
+    def test_floor_is_set_by_step_size_when_that_binds(self, filters):
+        # BTC 反过来：0.001 的步进在 77000 上值 77 USDT，比 50 USDT 的
+        # 最小名义金额更高，于是步进说了算。
+        floor = filters.get("BTCUSDT").min_tradable_notional(77000.0)
+        assert float(floor) == pytest.approx(77.0)
+
+    def test_floors_differ_by_more_than_4x_across_symbols(self, filters):
+        """这正是"用一个全局常量"错在哪里：差距不是零头，是数倍。"""
+        eth = float(filters.get("ETHUSDT").min_tradable_notional(2400.0))
+        sol = float(filters.get("SOLUSDT").min_tradable_notional(100.65))
+        assert eth > sol * 4
+
+    def test_the_floor_itself_is_actually_placeable(self, filters):
+        """下限必须是一个真能下出去的数。
+
+        它会被写进提示词交给模型，模型照着它给的仓位如果反而被拒，这个
+        下限就毫无意义。float 的 quote/price 往返曾让这一点不成立。
+        """
+        for symbol, price in (("BTCUSDT", 77000.0), ("ETHUSDT", 2400.0), ("SOLUSDT", 100.65)):
+            floor = float(filters.get(symbol).min_tradable_notional(price))
+            decision = filters.resolve_quantity(symbol, floor / price, price)
+            assert decision.accepted, f"{symbol} 的下限 {floor} 反而被拒：{decision.reason}"
+
+    def test_one_step_below_the_floor_is_rejected(self, filters):
+        """下限得是"最小"的，不能虚高——虚高会白白挡掉本可成交的仓位。"""
+        spec = filters.get("SOLUSDT")
+        price = 100.65
+        floor = float(spec.min_tradable_notional(price))
+        just_under = floor - float(spec.notional_step(price))
+        assert filters.resolve_quantity("SOLUSDT", just_under / price, price).rejected
+
+    def test_notional_step_is_what_one_step_is_worth(self, filters):
+        assert float(filters.get("SOLUSDT").notional_step(100.0)) == pytest.approx(1.0)
+        assert float(filters.get("BTCUSDT").notional_step(77000.0)) == pytest.approx(77.0)
+
+    def test_unusable_price_yields_no_opinion(self, filters):
+        assert filters.get("SOLUSDT").min_tradable_notional(0) == 0
+        assert filters.get("SOLUSDT").notional_step(-1) == 0
+
+
+class TestStepRoundingDoesNotLoseAWholeStep:
+    """quote/price 在 float 下会落到整数倍下方一个 ULP，直接向下取整会
+    整整少掉一个步进——0.05 SOL 变 0.04，白丢五分之一仓位。"""
+
+    def test_exact_multiple_survives_the_float_round_trip(self, filters):
+        # 5.0325 / 100.65 在 float 里是 0.049999999999999996
+        quantity = 5.0325 / 100.65
+        assert quantity < 0.05  # 前提：确实低于精确值
+        decision = filters.resolve_quantity("SOLUSDT", quantity, 100.65)
+        assert decision.accepted
+        assert decision.quantity == pytest.approx(0.05)
+
+    def test_snapping_never_rounds_a_real_request_up(self, filters):
+        """容差只修表示误差，不改变"向下取整"这条规则。"""
+        # 0.0037 离 0.004 差得远，仍然截断到 0.003
+        assert filters.resolve_quantity("BTCUSDT", 0.0037, 77000.0).quantity == pytest.approx(0.003)
+        # 差 0.5% 也不吸附
+        assert filters.resolve_quantity("SOLUSDT", 0.0995, 100.0).quantity == pytest.approx(0.09)

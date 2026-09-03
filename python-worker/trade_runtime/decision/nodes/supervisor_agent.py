@@ -73,6 +73,7 @@ from trade_runtime.decision.sizing import (
     DEFAULT_LEVERAGE,
     leverage_ceiling,
     min_viable_size_hint,
+    venue_order_floor,
 )
 from trade_runtime.decision.output_parsers import parse_json_object_content
 from trade_runtime.decision.state import DecisionState
@@ -742,24 +743,33 @@ _MIN_ORDER_NOTIONAL_USDT = float(
 
 
 def _sizing_constraints(state: DecisionState, runtime_config: dict) -> dict:
-    """算出这一刻真正可下的仓位区间。
+    """算出这一刻、这个标的真正可下的仓位区间。
 
     口径与 decision/sizing.py 完全一致（同一份实现），否则模型会按一个
     区间给值、风控和下单却按另一个算，出现"照着提示给的数反而被拒"。
 
     杠杆在这里是有用的：size_hint 是动用多少权益作为保证金，敞口是它乘
     杠杆，所以杠杆越高、能满足交易所最小下单额的 size_hint 下界越低。
-    100 USDT 权益、5 USDT 最小下单额，无杠杆要 0.05，3 倍下只要 0.017 ——
-    小账户能不能开出仓位，差别就在这里。
+
+    最小下单额必须按标的取。此前这里用的是一个全局常量 5 USDT，而实测
+    ETH 的真实下限是 21.6——模型照着 5 给 ETH 定了 10 和 15 USDT 两单，
+    建好、发出、被交易所过滤器静默拒掉，两次有效信号就这么没了。
     """
     equity = _safe_float(state.get("account_equity"), 0.0)
     max_ratio = _safe_float(runtime_config.get("max_position_ratio"), 0.0)
     ceiling = leverage_ceiling(runtime_config)
     default_leverage = min(DEFAULT_LEVERAGE, ceiling)
 
+    price = _current_market_price(state)
+    min_notional, notional_step, notional_source = venue_order_floor(
+        state.get("symbol") or "",
+        price,
+        _MIN_ORDER_NOTIONAL_USDT,
+    )
+
     # 下界按默认杠杆给：模型可以自己抬到 ceiling，那只会让下界更低。
-    min_size_hint = min_viable_size_hint(equity, default_leverage, _MIN_ORDER_NOTIONAL_USDT)
-    floor_at_max_leverage = min_viable_size_hint(equity, ceiling, _MIN_ORDER_NOTIONAL_USDT)
+    min_size_hint = min_viable_size_hint(equity, default_leverage, min_notional)
+    floor_at_max_leverage = min_viable_size_hint(equity, ceiling, min_notional)
 
     tradeable = (
         floor_at_max_leverage is not None
@@ -773,7 +783,12 @@ def _sizing_constraints(state: DecisionState, runtime_config: dict) -> dict:
         "leverage_scales_exposure": True,
         "default_leverage": int(default_leverage),
         "max_leverage": int(ceiling),
-        "min_order_notional_usdt": _MIN_ORDER_NOTIONAL_USDT,
+        "min_order_notional_usdt": round(min_notional, 4),
+        # 这个下限是这个标的自己的，不是全局值——各标的能差四倍以上。
+        "min_order_notional_symbol": state.get("symbol") or None,
+        "min_order_notional_source": notional_source,
+        # 成交数量按步进向下截断，所以下单额落在步进整数倍上才不浪费保证金。
+        "notional_step_usdt": round(notional_step, 4) if notional_step > 0 else None,
         "min_viable_size_hint": min_size_hint,
         "min_viable_size_hint_at_max_leverage": floor_at_max_leverage,
         "max_size_hint": max_ratio or None,
@@ -897,7 +912,11 @@ def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str
         "notional: at default_leverage that means size_hint of at least "
         "min_viable_size_hint, and raising leverage_hint lowers that floor down to "
         "min_viable_size_hint_at_max_leverage. An order below the minimum notional is "
-        "rejected outright, so it is strictly worse than SKIP. leverage_hint must be an "
+        "rejected outright, so it is strictly worse than SKIP. min_order_notional_usdt is "
+        "this symbol's own floor, not a shared one — symbols differ by more than 4x, so "
+        "never carry a size over from another symbol. Fills truncate down to a whole "
+        "multiple of notional_step_usdt, so exposure landing just under a step is paid "
+        "for in margin but never opened; aim at a multiple. leverage_hint must be an "
         "integer between 1 and max_leverage; omit it to use default_leverage. Choose "
         "leverage for the setup, not to satisfy the minimum — if the only way to clear "
         "the floor is leverage you would not otherwise take, return SKIP. "

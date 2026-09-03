@@ -174,8 +174,17 @@ public class TradeExecutionServiceImpl implements ITradeExecutionService {
         normalizePositionSnapshotEntryTraceId(positionSnapshot, previous);
         tradeExecutionMapper.insertPositionSnapshot(positionSnapshot);
         PositionChangeLog changeLog = buildPositionChangeLog(positionSnapshot, previous);
-        tradeExecutionMapper.insertPositionChangeLog(changeLog);
-        sendPositionChangeNotification(positionSnapshot, changeLog);
+        // 快照可以重复落（浮盈盯市就会以相同数量、相同方向再落一次），但
+        // "仓位变更"是给人看的列表，只有真的动了仓位才该进去。数量和方向
+        // 都没变时 changeType 是 UPDATE —— 那不是一次变更。
+        if (!isUnchangedPosition(changeLog)) {
+            tradeExecutionMapper.insertPositionChangeLog(changeLog);
+            sendPositionChangeNotification(positionSnapshot, changeLog);
+        }
+    }
+
+    private boolean isUnchangedPosition(PositionChangeLog changeLog) {
+        return changeLog != null && "UPDATE".equals(changeLog.getChangeType());
     }
 
     private void normalizePositionSnapshotCreatedAt(PositionSnapshot positionSnapshot) {

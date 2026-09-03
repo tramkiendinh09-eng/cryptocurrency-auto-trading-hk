@@ -26,6 +26,15 @@ from an exchange error code.
 Rounding is always **down** to the step. Rounding up would place more risk than
 the supervisor asked for, and "slightly too small" is a recoverable outcome in a
 way that "silently larger than intended" is not.
+
+The one wrinkle is that the caller divides ``quote / price`` in binary floating
+point before this module ever sees the number, and that division lands one ULP
+*below* the exact value whenever the answer is a clean step multiple:
+``5.0325 / 100.65`` is ``0.049999999999999996``, not ``0.05``. Rounding that
+down costs a whole step — 0.05 SOL becomes 0.04, a fifth of the position, for no
+reason anyone can see. So a ratio sitting within a hair of a step boundary is
+snapped back onto it before the round-down. That is not rounding up: the
+tolerance is far too small to promote a size anybody deliberately asked for.
 """
 
 from __future__ import annotations
@@ -34,12 +43,17 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal, InvalidOperation
 from typing import Any
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+#: 判定"这个比值其实就是整数倍"的相对容差。取 1e-9 是因为它比 float
+#: 往返误差（约 1e-16 相对）大了七个数量级，又远小于任何有意义的下单量
+#: 差异——不可能把谁真正想要的仓位放大一个步进。
+_STEP_SNAP_TOLERANCE = Decimal("1e-9")
 
 _DEFAULT_BASE_URL = "https://fapi.binance.com"
 _TESTNET_BASE_URL = "https://demo-fapi.binance.com"
@@ -55,11 +69,64 @@ class SymbolFilter:
     quantity_precision: int
 
     def quantize(self, quantity: Decimal) -> Decimal:
-        """Snap down to the venue's step size."""
+        """Snap down to the venue's step size.
+
+        Representation error from the caller's float division is corrected
+        first — see the module docstring — otherwise a quantity that is exactly
+        a step multiple loses an entire step.
+        """
         if self.step_size <= 0:
             return quantity
-        steps = (quantity / self.step_size).to_integral_value(rounding=ROUND_DOWN)
+        ratio = quantity / self.step_size
+        nearest = ratio.to_integral_value(rounding=ROUND_HALF_UP)
+        if nearest > 0 and abs(ratio - nearest) <= _STEP_SNAP_TOLERANCE * nearest:
+            ratio = nearest
+        steps = ratio.to_integral_value(rounding=ROUND_DOWN)
         return steps * self.step_size
+
+    def _round_up_to_step(self, quantity: Decimal) -> Decimal:
+        if self.step_size <= 0:
+            return quantity
+        steps = (quantity / self.step_size).to_integral_value(rounding=ROUND_UP)
+        return steps * self.step_size
+
+    def min_tradable_notional(self, price: Any) -> Decimal:
+        """The smallest notional this venue actually accepts at ``price``.
+
+        ``resolve_quantity`` answers "may I send this size?"; sizing needs the
+        inverse — "what is the smallest size worth sending?" — and there is no
+        single answer across symbols. Three constraints stack: the quantity has
+        to be a whole number of ``step_size``, no smaller than ``min_qty``, and
+        worth at least ``min_notional``. Whichever binds hardest wins, and which
+        one that is changes per symbol: ETHUSDT is held up by its 20 USDT
+        ``min_notional`` while BTCUSDT is held up by a 0.001 step worth far more
+        than its 50 USDT minimum.
+
+        Returns 0 ("no opinion") when the price is unusable.
+        """
+        px = _to_decimal(price)
+        if px <= 0:
+            return Decimal("0")
+        quantity = self.min_qty if self.min_qty > 0 else self.step_size
+        if self.min_notional > 0:
+            quantity = max(quantity, self._round_up_to_step(self.min_notional / px))
+        quantity = self._round_up_to_step(quantity)
+        if quantity <= 0:
+            return Decimal("0")
+        return quantity * px
+
+    def notional_step(self, price: Any) -> Decimal:
+        """What one ``step_size`` is worth — the granularity of any order.
+
+        Fills round **down** to a step, so on a small account this is not a
+        rounding detail: a 12 USDT BNBUSDT order became a 7.01 USDT position
+        because 0.017 BNB truncated to 0.01. The model can avoid most of that
+        waste, but only if it is told the step exists.
+        """
+        px = _to_decimal(price)
+        if px <= 0 or self.step_size <= 0:
+            return Decimal("0")
+        return self.step_size * px
 
 
 @dataclass(frozen=True)

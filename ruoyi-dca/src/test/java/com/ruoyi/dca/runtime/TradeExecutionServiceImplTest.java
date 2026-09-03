@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -210,6 +211,69 @@ class TradeExecutionServiceImplTest {
         assertThat(changeCaptor.getValue().getChangeType()).isEqualTo("OPEN");
         assertThat(changeCaptor.getValue().getBeforeQuantity()).isEqualByComparingTo("0");
         assertThat(changeCaptor.getValue().getAfterQuantity()).isEqualByComparingTo("0.0546875");
+    }
+
+    @Test
+    void markToMarketSnapshotDoesNotPolluteTheChangeLog() {
+        // 浮盈盯市会以相同数量、相同方向重新落一次快照。快照该落，但"仓位
+        // 变更"是给人看的列表，一条 delta 为 0 的记录只会把真正的开平仓淹掉。
+        PositionSnapshot previous = new PositionSnapshot();
+        previous.setTraceId("trace-open-1");
+        previous.setEntryTraceId("trace-open-1");
+        previous.setExchangeCode("binance");
+        previous.setSymbol("BNBUSDT");
+        previous.setSide("long");
+        previous.setPositionQuantity(new java.math.BigDecimal("0.01"));
+        previous.setEntryPrice(new java.math.BigDecimal("701.16"));
+
+        PositionSnapshot mark = new PositionSnapshot();
+        mark.setTraceId("trace-hold-9");
+        mark.setEntryTraceId("trace-open-1");
+        mark.setExchangeCode("binance");
+        mark.setSymbol("BNBUSDT");
+        mark.setSide("long");
+        mark.setPositionQuantity(new java.math.BigDecimal("0.01"));
+        mark.setEntryPrice(new java.math.BigDecimal("701.16"));
+        mark.setUnrealizedPnl(new java.math.BigDecimal("0.1132"));
+
+        when(tradeExecutionMapper.selectLatestPositionSnapshotByScope("binance", "BNBUSDT", "long"))
+            .thenReturn(previous);
+
+        tradeExecutionService.recordPositionSnapshot(mark);
+
+        // 快照要落——控制台的收益读的就是它
+        ArgumentCaptor<PositionSnapshot> captor = ArgumentCaptor.forClass(PositionSnapshot.class);
+        verify(tradeExecutionMapper).insertPositionSnapshot(captor.capture());
+        assertThat(captor.getValue().getUnrealizedPnl()).isEqualByComparingTo("0.1132");
+        // 变更日志不要落
+        verify(tradeExecutionMapper, never()).insertPositionChangeLog(any(PositionChangeLog.class));
+    }
+
+    @Test
+    void realPositionChangesStillReachTheChangeLog() {
+        // 守卫不能把真实的加仓一起挡掉。
+        PositionSnapshot previous = new PositionSnapshot();
+        previous.setExchangeCode("binance");
+        previous.setSymbol("BNBUSDT");
+        previous.setSide("long");
+        previous.setPositionQuantity(new java.math.BigDecimal("0.01"));
+
+        PositionSnapshot added = new PositionSnapshot();
+        added.setTraceId("trace-add-1");
+        added.setExchangeCode("binance");
+        added.setSymbol("BNBUSDT");
+        added.setSide("long");
+        added.setPositionQuantity(new java.math.BigDecimal("0.02"));
+        added.setEntryPrice(new java.math.BigDecimal("705.00"));
+
+        when(tradeExecutionMapper.selectLatestPositionSnapshotByScope("binance", "BNBUSDT", "long"))
+            .thenReturn(previous);
+
+        tradeExecutionService.recordPositionSnapshot(added);
+
+        ArgumentCaptor<PositionChangeLog> captor = ArgumentCaptor.forClass(PositionChangeLog.class);
+        verify(tradeExecutionMapper).insertPositionChangeLog(captor.capture());
+        assertThat(captor.getValue().getChangeType()).isEqualTo("ADD");
     }
 
     @Test

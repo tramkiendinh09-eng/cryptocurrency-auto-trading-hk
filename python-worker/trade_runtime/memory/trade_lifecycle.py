@@ -16,9 +16,19 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from trade_runtime.execution.status import (
+    execution_moved_position,
+    execution_status_of,
+)
 from trade_runtime.memory.price_pattern import analyze_price_pattern
 
 logger = logging.getLogger(__name__)
+
+#: 会改变仓位的动作。只有这些需要"确实成交了"作为前置条件；
+#: SKIP/HOLD 本来就不写生命周期。
+_POSITION_MUTATING_ACTIONS = frozenset(
+    {"OPEN_LONG", "OPEN_SHORT", "ADD_LONG", "ADD_SHORT", "REDUCE", "CLOSE"}
+)
 
 
 class TradeLifecycleClient:
@@ -647,6 +657,26 @@ def process_trade_lifecycle(
     trace_id = state.get("trace_id")
     symbol = state.get("symbol")
     exchange = state.get("exchange")
+
+    # 生命周期记的是仓位，不是意图。此前这里只看模型给了什么动作，从不
+    # 检查这一单到底成没成交——而 router 即使返回 skipped 也会带上
+    # entry_price，前置条件照样满足。结果是两笔被交易所以"低于该标的最小
+    # 名义金额"拒掉的 ETH 单，各留下一条 exit_time 永远为空的持仓记录，
+    # 记着两笔从未存在过的仓位，还会污染后续的交易记忆。
+    if action in _POSITION_MUTATING_ACTIONS and not execution_moved_position(execution_result):
+        status = execution_status_of(execution_result) or "unknown"
+        logger.debug(
+            "Skipping lifecycle %s: execution did not move the position (status=%s) trace_id=%s",
+            action,
+            status,
+            trace_id,
+        )
+        return {
+            "status": "skipped",
+            "operation": "entry" if action in {"OPEN_LONG", "OPEN_SHORT"} else action.lower(),
+            "reason": f"execution_not_filled:{status}",
+            "trace_id": trace_id,
+        }
 
     if action in {"OPEN_LONG", "OPEN_SHORT"}:
         side = "long" if "LONG" in action else "short"

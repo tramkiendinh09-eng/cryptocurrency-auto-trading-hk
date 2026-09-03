@@ -22,6 +22,7 @@ from trade_runtime.decision.sizing import (
 from trade_runtime.decision.state import DecisionState
 from trade_runtime.decision.timestamps import stamp_state_timestamp
 from trade_runtime.execution.router import ExecutionRouter
+from trade_runtime.execution.status import execution_moved_position
 
 
 _BUSINESS_TO_ORDER_STATUS = {
@@ -124,10 +125,9 @@ def _resulting_position_quantity(state: DecisionState, decision: dict, execution
 
 
 def _should_post_position_snapshot(execution_result: dict, fill_quantity: float) -> bool:
-    status = str(execution_result.get("status") or "").strip().lower()
-    if status in {"pending", "submitted", "failed", "blocked", "skipped", "canceled", "expired"}:
-        return False
-    return fill_quantity > 0
+    # 判定与 trade_lifecycle 共用同一份定义：仓位快照与持仓生命周期若对
+    # 同一次执行给出不同答案，账就对不上了。
+    return execution_moved_position(execution_result) and fill_quantity > 0
 
 
 def _calculate_unrealized_pnl(
@@ -522,6 +522,52 @@ def _normalize_execution_status_pair(execution_result: dict) -> dict:
     return normalized
 
 
+def _refresh_open_position_mark(state: DecisionState) -> None:
+    """把持仓中的浮动盈亏按现价重算一遍并落库。
+
+    position_snapshot 此前只在成交时写入，而成交那一刻开仓价必然等于成交价，
+    浮盈算出来就是 0；持仓期间没有任何东西再更新它，这一行于是永远停在 0。
+    控制台的收益读的正是 sum(unrealized_pnl)——TradeRuntimeOverviewMapper 取
+    每个标的最新一行再求和——所以一笔正在赚钱的持仓在系统自己的报表里完全
+    不存在：BNB 浮盈 +0.11 USDT，面板显示 0。
+
+    只在 HOLD 时刷新。HOLD 意味着模型确实复评过这个仓位，是一个自然的对账
+    时点；RULE_ONLY 的 SKIP 每分钟都有，按那个频率写会把这张表灌满，而它们
+    并没有带来任何新的判断。
+    """
+    callback_client = state.get("callback_client")
+    if callback_client is None or not hasattr(callback_client, "post_position_snapshot"):
+        return
+    side = _normalize_position_side(state.get("current_position_side"))
+    if side not in {"long", "short"}:
+        return
+    quantity = float(state.get("current_position_quantity", 0.0) or 0.0)
+    if quantity <= 0:
+        return
+    entry_price = _current_entry_price(state)
+    current_price = _runtime_execution_price(state)
+    if entry_price <= 0 or current_price <= 0:
+        # 没有可信的价格就不写：一个算错的浮盈比一个没更新的浮盈更糟。
+        return
+    unrealized_pnl = _calculate_unrealized_pnl(side, quantity, entry_price, current_price)
+    trace_id = state.get("trace_id", "")
+    user_id = _strategy_user_id(state)
+    callback_client.post_position_snapshot(
+        {
+            "traceId": trace_id,
+            "entryTraceId": state.get("entry_trace_id") or state.get("entryTraceId") or trace_id,
+            "exchangeCode": state.get("exchange", "binance"),
+            "symbol": state.get("symbol", ""),
+            "side": side,
+            "positionQuantity": quantity,
+            "entryPrice": entry_price,
+            "unrealizedPnl": unrealized_pnl,
+            **({"userId": user_id} if user_id is not None else {}),
+        }
+    )
+    state["unrealized_pnl"] = unrealized_pnl
+
+
 def _post_exchange_order_callback(state: DecisionState, side: str) -> None:
     callback_client = state.get("callback_client")
     if callback_client is None or not hasattr(callback_client, "post_exchange_order"):
@@ -613,6 +659,8 @@ def execution_node(state: DecisionState) -> DecisionState:
             {"status": "skipped", "reason": "hold" if action == "HOLD" else "skip"}
         )
         _post_exchange_order_callback(state, side)
+        if action == "HOLD":
+            _refresh_open_position_mark(state)
         return state
     if not risk_result.get("passed", False):
         state["execution_result"] = _normalize_execution_status_pair(

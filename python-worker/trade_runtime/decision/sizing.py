@@ -101,5 +101,62 @@ def min_viable_size_hint(
         return None
     lev = max(float(leverage or 1.0), 1.0)
     raw = float(min_order_notional) / (equity * lev)
-    # 向上取整到三位小数，避免边界上算出刚好差一点的单子
-    return math.ceil(raw * 1000) / 1000
+    # 向上取整到三位小数，避免边界上算出刚好差一点的单子。
+    # 先 round 掉浮点噪声再取整：21.6/300 在 float 下是 0.07200000000000001，
+    # 直接 ceil 会跳到 0.073，凭空多要 1.4% 的保证金。
+    return math.ceil(round(raw * 1000, 6)) / 1000
+
+#: 查不到交易所过滤器时用的兜底最小下单额（USDT）。
+#: 兜底值偏小是有意的：宁可让一单被交易所拒掉，也不要凭空抬高下界、
+#: 把本来能开的仓位挡在门外——前者丢一次信号，后者是永久性的。
+FALLBACK_MIN_ORDER_NOTIONAL_USDT = 5.0
+
+
+def venue_order_floor(
+    symbol: str,
+    price: float,
+    fallback_min_notional: float = FALLBACK_MIN_ORDER_NOTIONAL_USDT,
+) -> tuple[float, float, str]:
+    """取这个标的此刻真实的最小下单额与下单粒度。
+
+    最小下单额**不是**一个全局常量，而各处代码此前都当成常量在用（5 USDT）。
+    实测这批标的：SOL/XRP/DOGE/SUI 约 5，BNB 7.1，NVDA 6.7，而 ETH 是
+    21.6——差了四倍多。后果不是理论上的：模型照着"5 USDT 下限"给 ETH 定了
+    10 和 15 USDT 两单，两单都建好、发出去，然后被交易所过滤器静默拒掉，
+    信号直接丢失。
+
+    返回 (最小下单额, 一个步进值多少钱, 数据来源)。查不到过滤器时退回兜底
+    值并标注来源，让调用方知道这个数是猜的。
+
+    Args:
+        symbol: 交易对
+        price: 当前价格，最小下单额随价格变（步进是按币量定的）
+        fallback_min_notional: 查不到时的兜底值
+
+    Returns:
+        tuple[float, float, str]: (min_notional, notional_step, source)
+    """
+    fallback = max(float(fallback_min_notional or 0.0), 0.0)
+    resolved_price = _optional_float(price) or 0.0
+    if resolved_price <= 0:
+        return fallback, 0.0, "fallback:no_price"
+    try:
+        # 延迟导入：symbol_filters 会发网络请求取 exchangeInfo，不该在
+        # 本模块被 import 时就产生副作用。execution 不反向依赖 decision，
+        # 所以这里不构成循环导入。
+        from trade_runtime.execution.symbol_filters import shared_binance_filters
+
+        spec = shared_binance_filters().get(symbol)
+    except Exception:
+        # 交易所信息拿不到（离线、限流）不能让决策链断掉：退回兜底值。
+        return fallback, 0.0, "fallback:filters_unavailable"
+    if spec is None:
+        return fallback, 0.0, "fallback:unknown_symbol"
+    try:
+        floor = float(spec.min_tradable_notional(resolved_price))
+        step = float(spec.notional_step(resolved_price))
+    except Exception:
+        return fallback, 0.0, "fallback:filter_error"
+    if floor <= 0:
+        return fallback, 0.0, "fallback:no_constraint"
+    return floor, max(step, 0.0), "venue"
