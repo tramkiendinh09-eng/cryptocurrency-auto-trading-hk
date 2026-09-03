@@ -254,6 +254,23 @@ class TestRearmNeedsAMaterialChange:
         assert _watch(watcher, 99.5, _at(0), self.FLAGS)["triggered"] is True
         assert _watch(watcher, 99.2, _at(10), self.FLAGS)["triggered"] is False
 
+    def test_close_rearms_on_time_alone(self):
+        """close 不是"再问一次"，是要动手平仓。上一次若没真的平掉，指标未必
+        会再动——变化门槛套在它身上会让这道保护永不重试。
+        """
+        flags = (
+            '{"positionRiskWatcher":{"reviewAdverseMovePct":0.3,"reduceAdverseMovePct":0.5,'
+            '"closeAdverseMovePct":0.8,"cooldownSecondsBySeverity":{"close":60},"rearmDeltaPct":0.15}}'
+        )
+        watcher = PositionRiskWatcher()
+        first = _watch(watcher, 99.0, _at(0), flags)
+        assert first["severity"] == "close"
+        assert first["triggered"] is True
+        # 冷却内仍然静默
+        assert _watch(watcher, 99.0, _at(30), flags)["triggered"] is False
+        # 冷却过后，指标一动没动也要重新触发
+        assert _watch(watcher, 99.0, _at(0, 2), flags)["triggered"] is True
+
     def test_structure_reversal_is_not_silenced_forever(self):
         """结构反转是个布尔判定，值恒为 1.0；拿它去比差值会让这一级在第一次
         派发之后被永久静音。变化门槛只适用于连续量。

@@ -442,6 +442,11 @@ class PositionRiskWatcher:
             previous_metric = previous.get("metric")
             unchanged = (
                 rearm_delta > 0
+                # close 级不受变化门槛约束。它不是"再问模型一次"，而是要动手
+                # 平仓（hardCloseEnabled 打开时更是直接下单）。上一次派发若
+                # 因为下单被拒或链路故障没能真的平掉，指标未必会再动 0.15 个
+                # 百分点——那样这道保护就永远不会重试，仓位一直挂在那里。
+                and severity != "close"
                 and metric is not None
                 and previous_metric is not None
                 and abs(metric - float(previous_metric)) < rearm_delta
