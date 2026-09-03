@@ -89,6 +89,29 @@ FC=$(q "SELECT COUNT(*) FROM decision_run WHERE created_at > $SINCE AND summary_
 say "fail-closed 决策" "${FC:-0}"
 line
 
+# ── 持仓风险有没有在反复问同一个问题 ────────────────────────────────
+# 这一段是被 48% 的 LLM 失败率逼出来的。position_risk 事件会绕过派发冷却，
+# 一度还绕过 LLM 预算，于是一笔浮亏持仓每 30 秒就把同一个问题重问一遍：
+# 近 6 小时里 MU 一个标的问了 103 次、模型 82 次答 HOLD，占掉全部 LLM 派发
+# 的六成，把中转网关打到 503——连真正紧急的那次问询也一起被打掉。
+# 改动见 position_risk_watcher：分级冷却 + 指标要有实质变化才重新问，
+# 且只有 reduce/close 才抢占预算。这里盯的就是它有没有回潮。
+echo "持仓风险问询"
+read -r PR PRL <<<"$(q "SELECT COUNT(*), SUM(dispatch_mode='LLM_ALLOWED')
+  FROM decision_run WHERE created_at > $SINCE AND trigger_source='position_risk'")"
+say "触发决策" "${PR:-0}（其中进 LLM ${PRL:-0}）"
+if [ "${LA:-0}" -gt 0 ]; then
+  say "占全部 LLM 派发" "$(awk -v a="${PRL:-0}" -v b="$LA" 'BEGIN{printf "%.1f%%", 100*a/b}')"
+fi
+q "SELECT symbol, COUNT(*), SUM(action='HOLD')
+   FROM decision_run WHERE created_at > $SINCE AND trigger_source='position_risk'
+     AND dispatch_mode='LLM_ALLOWED' AND symbol <> ''
+   GROUP BY symbol HAVING COUNT(*) > 0 ORDER BY 2 DESC LIMIT 5" |
+while IFS=$'\t' read -r sym n holds; do
+  printf '      %-14s %4s 次/%s 小时，%s 次 HOLD\n' "$sym" "$n" "$HOURS" "${holds:-0}"
+done
+line
+
 # ── 产出：有没有真的动手 ────────────────────────────────────────────
 echo "产出"
 say "非 SKIP 决策" "$(q "SELECT COUNT(*) FROM decision_run WHERE created_at > $SINCE AND action NOT IN ('SKIP','NO_ACTION') AND action <> ''")"
@@ -129,7 +152,10 @@ echo "    的弹性表提高 perSymbolDailyLimit 与 rollingWindowLimit（两个
 echo "    日上限会先撞到）"
 echo "  · 「占日上限」普遍很低而成交仍为 0 → 瓶颈不在预算，在信号或策略本身，"
 echo "    调预算是浪费钱"
-echo "  · fail-closed 占 LLM 调用一成以上 → 先查中转网关，别急着加预算"
+echo "  · fail-closed 占 LLM 调用一成以上 → 先看上面这段：多半是自己把网关"
+echo "    打满了，而不是网关自己坏了"
+echo "  · 单个标的的持仓风险问询远多于其它标的、且几乎全是 HOLD → 冷却或"
+echo "    rearmDeltaPct 太松，在拿几乎一样的数字重复问同一个问题"
 echo "  · 非 SKIP 决策持续为 0 且样本已足够 → 该回头看 prompt 与入场条件，"
 echo "    而不是继续放门控"
 echo
