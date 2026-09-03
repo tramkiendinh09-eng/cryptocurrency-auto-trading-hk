@@ -13,6 +13,12 @@ from __future__ import annotations
 
 import json
 
+from trade_runtime.decision.sizing import (
+    DEFAULT_LEVERAGE,
+    LEVERAGE_HARD_CEILING,
+    order_notional,
+    resolve_leverage,
+)
 from trade_runtime.decision.state import DecisionState
 from trade_runtime.decision.timestamps import stamp_state_timestamp
 from trade_runtime.execution.router import ExecutionRouter
@@ -355,7 +361,11 @@ def _order_quote_amount(state: DecisionState, decision: dict, account_equity: fl
             size_hint = float(decision.get("size_hint", 1.0 if action == "CLOSE" else 0.5))
             return calculated_notional if action == "CLOSE" else calculated_notional * size_hint
     size_hint = float(decision.get("size_hint", 0.0))
-    return account_equity * size_hint
+    # size_hint 是"动用多少权益作为保证金"，敞口要再乘杠杆。
+    # 此前这里直接返回 account_equity * size_hint，杠杆只作为订单元数据
+    # 发给交易所、不参与仓位计算，于是 100 USDT 的账户敞口永远不超过
+    # max_position_ratio × 100 = 30 USDT，配置里的 maxLeverage 形同虚设。
+    return order_notional(account_equity, size_hint, _resolve_leverage(state, decision))
 
 
 def _order_quantity_base(state: DecisionState, decision: dict) -> float:
@@ -400,36 +410,22 @@ def _optional_float(value) -> float | None:
         return None
 
 
-DEFAULT_MAX_LEVERAGE = 3.0
+DEFAULT_MAX_LEVERAGE = DEFAULT_LEVERAGE
+MAX_LEVERAGE_CEILING = LEVERAGE_HARD_CEILING
 
 
-def _resolve_leverage(state, decision) -> float | None:
-    """Bound the leverage the supervisor asked for.
+def _resolve_leverage(state, decision) -> float:
+    """定出这一单实际使用的杠杆。
 
-    ``leverage_hint`` comes straight out of the model. Binance applies leverage
-    as account state, so an unbounded hint is not merely a bad order — it
-    changes the margin regime for every later order on that symbol too.
+    判定逻辑统一放在 decision/sizing.py：同一个倍数要在风控、下单、以及
+    写给模型看的可下区间三处算出完全一样的结果，分散实现迟早会走偏。
 
-    ``maxLeverage`` in the runtime config is the ceiling; the fallback is
-    deliberately low, because the failure mode of too little leverage is a
-    rejected order and the failure mode of too much is a liquidation.
+    与改动前的差别有两点。一是不再返回 None：模型没给 leverage_hint 时
+    退回默认倍数，而不是让调用方各自决定；二是杠杆现在真正参与仓位计算，
+    不再只是发给交易所的一个字段。
     """
-    raw = _optional_float(decision.get("leverage") or decision.get("leverage_hint"))
     runtime_config = state.get("runtime_config") if isinstance(state, dict) else None
-    ceiling = None
-    if isinstance(runtime_config, dict):
-        ceiling = _optional_float(
-            runtime_config.get("max_leverage")
-            if runtime_config.get("max_leverage") is not None
-            else runtime_config.get("maxLeverage")
-        )
-    if ceiling is None or ceiling <= 0:
-        ceiling = DEFAULT_MAX_LEVERAGE
-    if raw is None:
-        return None
-    if raw <= 0:
-        return None
-    return min(float(raw), float(ceiling))
+    return resolve_leverage(runtime_config, decision)
 
 
 def _enrich_order_metadata(state: DecisionState, decision: dict, order: dict) -> dict:

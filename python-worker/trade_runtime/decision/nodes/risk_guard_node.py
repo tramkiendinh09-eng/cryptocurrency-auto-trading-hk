@@ -67,6 +67,7 @@
 
 from __future__ import annotations
 
+from trade_runtime.decision.sizing import order_notional, resolve_leverage
 from trade_runtime.decision.state import DecisionState
 from trade_runtime.decision.timestamps import stamp_state_timestamp
 from trade_runtime.risk.guard import RiskGuard
@@ -330,7 +331,12 @@ def risk_guard_node(state: DecisionState) -> DecisionState:
     # 提取账户状态信息
     account_equity = float(state.get("account_equity", 10_000))
     size_hint = float(decision.get("size_hint", 0.0))
-    requested_notional = float(state.get("requested_notional", account_equity * size_hint))
+    # 必须与 execution_node 用同一个公式，否则会出现"风控放行了但下不出去"
+    # 或者"模型按区间给的值被拒"这类很难查的问题。
+    order_leverage = resolve_leverage(state.get("runtime_config"), decision)
+    requested_notional = float(
+        state.get("requested_notional", order_notional(account_equity, size_hint, order_leverage))
+    )
     current_position_notional = float(state.get("current_position_notional", 0.0) or 0.0)
     daily_pnl = float(state.get("daily_pnl", 0.0))
     consecutive_failures = int(state.get("consecutive_failures", 0))
@@ -344,6 +350,10 @@ def risk_guard_node(state: DecisionState) -> DecisionState:
         requested_notional=requested_notional,
         current_position_notional=current_position_notional,
         check_position_limit=action in {"OPEN_LONG", "OPEN_SHORT", "ADD_LONG", "ADD_SHORT"},
+        # 传进去让上限按保证金口径判定：max_position_ratio 约束的是动用了
+        # 多少权益，不是敞口，否则 3 倍杠杆下 0.3 的上限会把 size_hint
+        # 压回 0.1，杠杆白加。
+        leverage=order_leverage,
         daily_pnl=daily_pnl,
         consecutive_failures=consecutive_failures,
         mode=state.get("mode"),

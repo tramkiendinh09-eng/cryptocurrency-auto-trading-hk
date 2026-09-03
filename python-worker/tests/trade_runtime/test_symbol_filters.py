@@ -272,13 +272,18 @@ def test_leverage_falls_back_to_conservative_default():
     )
 
 
-def test_absent_or_invalid_leverage_stays_absent():
-    from trade_runtime.decision.nodes.execution_node import _resolve_leverage
+def test_absent_or_invalid_leverage_falls_back_to_the_default():
+    """杠杆此前只是发给交易所的一个可选字段，缺省就不带；现在它参与仓位
+    计算，"没有杠杆"不再是一个合法状态——缺省即默认 3 倍。"""
+    from trade_runtime.decision.nodes.execution_node import (
+        DEFAULT_MAX_LEVERAGE,
+        _resolve_leverage,
+    )
 
-    assert _resolve_leverage({}, {}) is None
-    assert _resolve_leverage({}, {"leverage_hint": 0}) is None
-    assert _resolve_leverage({}, {"leverage_hint": -5}) is None
-    assert _resolve_leverage({}, {"leverage_hint": "abc"}) is None
+    assert _resolve_leverage({}, {}) == pytest.approx(DEFAULT_MAX_LEVERAGE)
+    assert _resolve_leverage({}, {"leverage_hint": 0}) == pytest.approx(DEFAULT_MAX_LEVERAGE)
+    assert _resolve_leverage({}, {"leverage_hint": -5}) == pytest.approx(DEFAULT_MAX_LEVERAGE)
+    assert _resolve_leverage({}, {"leverage_hint": "abc"}) == pytest.approx(DEFAULT_MAX_LEVERAGE)
 
 
 # ── trade lifecycle payload contract ──────────────────────────────────────

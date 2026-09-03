@@ -435,7 +435,13 @@ def test_risk_guard_node_blocks_when_projected_position_exceeds_runtime_limit():
             "event_bundle": [{"event_type": "market_tick"}],
             "feature_snapshot": {},
             "mode": "paper",
-            "supervisor_decision": {"action": "ADD_LONG", "size_hint": 0.1, "side": "long"},
+            # max_position_ratio 现在约束的是保证金占比而不是敞口占比，
+            # 所以要触发这条上限，输入得按新口径重算：
+            #   请求敞口 = 10000 × 0.25 × 3（默认杠杆）= 7500，保证金 2500
+            #   叠加已有 2000 敞口（保证金 667）后共 3167 = 权益的 31.7%
+            #   超过 0.25，应当被拦。
+            # 旧口径下 size_hint 0.1 就够了，那是因为当时直接拿敞口去比。
+            "supervisor_decision": {"action": "ADD_LONG", "size_hint": 0.25, "side": "long"},
             "account_equity": 10000.0,
             "current_position_notional": 2000.0,
             "runtime_config": {
@@ -897,7 +903,9 @@ def test_execution_node_emits_paper_trade_order_callback_in_paper_mode():
 
     assert state["execution_result"]["status"] == "filled"
     assert callback_client.paper_trade_order_payloads[0]["traceId"] == "t-paper-1"
-    assert callback_client.paper_trade_order_payloads[0]["quoteAmount"] == 3500.0
+    # 敞口 = 权益 × size_hint × 杠杆。模型没给 leverage_hint，用默认 3 倍，
+    # 所以是此前的 3500 的三倍——杠杆现在真正参与仓位计算了。
+    assert callback_client.paper_trade_order_payloads[0]["quoteAmount"] == 10500.0
     assert callback_client.paper_trade_order_payloads[0]["orderRef"] == "paper-BTCUSDT"
     assert callback_client.paper_trade_order_payloads[0]["executionStatus"] == "filled"
     assert callback_client.paper_trade_order_payloads[0]["orderStatus"] == "FILLED"
@@ -1444,7 +1452,8 @@ def test_graph_executes_paper_order_after_risk_passes():
     assert result["execution_result"]["status"] == "filled"
     assert result["execution_result"]["order_id"] == "paper-BTCUSDT"
     assert callback_client.order_payloads[0]["traceId"] == "t-4"
-    assert callback_client.order_payloads[0]["quoteAmount"] == 3500.0
+    # 同上：默认 3 倍杠杆下敞口是保证金的三倍。
+    assert callback_client.order_payloads[0]["quoteAmount"] == 10500.0
     assert callback_client.exchange_order_payloads[0]["orderRef"] == "paper-BTCUSDT"
     assert callback_client.exchange_order_payloads[0]["status"] == "filled"
     assert callback_client.exchange_order_payloads[0]["executionStatus"] == "filled"

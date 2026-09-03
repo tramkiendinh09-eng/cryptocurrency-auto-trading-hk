@@ -65,6 +65,7 @@ class RiskGuard:
         requested_notional: float,
         current_position_notional: float = 0.0,
         check_position_limit: bool = True,
+        leverage: float = 1.0,
         daily_pnl: float,
         consecutive_failures: int,
         mode: str | None = None,
@@ -81,9 +82,11 @@ class RiskGuard:
 
         Args:
             account_equity: 账户权益
-            requested_notional: 请求的名义价值
-            current_position_notional: 当前仓位名义价值
+            requested_notional: 请求的名义价值（已含杠杆）
+            current_position_notional: 当前仓位名义价值（已含杠杆）
             check_position_limit: 是否检查仓位限制
+            leverage: 本次下单的杠杆倍数，用于把名义价值换算回保证金。
+                缺省 1 时上限等同于直接约束名义价值，与加入杠杆前一致
             daily_pnl: 日盈亏
             consecutive_failures: 连续失败次数
             mode: 运行模式
@@ -138,7 +141,12 @@ class RiskGuard:
         projected_position_notional = max(0.0, float(current_position_notional or 0.0)) + max(
             0.0, float(requested_notional or 0.0)
         )
-        if check_position_limit and account_equity > 0 and projected_position_notional / account_equity > self.max_position_ratio:
+        # max_position_ratio 约束的是"动用了多少权益"，即保证金占比，
+        # 而不是敞口占比。合约里这两者相差一个杠杆倍数：拿敞口去比，
+        # 3 倍杠杆下 0.3 的上限会把可用 size_hint 压回 0.1，杠杆白加。
+        effective_leverage = max(float(leverage or 1.0), 1.0)
+        projected_margin = projected_position_notional / effective_leverage
+        if check_position_limit and account_equity > 0 and projected_margin / account_equity > self.max_position_ratio:
             return RiskEvaluation(
                 passed=False,
                 reason="position_limit",

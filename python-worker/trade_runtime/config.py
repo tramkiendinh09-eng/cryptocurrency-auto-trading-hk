@@ -90,6 +90,10 @@ def _deep_merge_dicts(base: Any, override: Any) -> Any:
 
 def _runtime_policy_defaults() -> dict[str, Any]:
     return {
+        # 杠杆的默认倍数。上界的硬夹持在 decision/sizing.py，那里不允许
+        # 超过 10——把上限写死在代码里，是为了让"配置多打一个零"不至于
+        # 变成 100 倍杠杆。
+        "maxLeverage": 3.0,
         "triggerMode": "EVENT_GATED",
         "marketTrigger": {
             "priceChangePct": 2.5,
@@ -299,6 +303,10 @@ class RuntimeConfig(BaseModel):
     llm_budget_policy: dict[str, Any] = Field(default_factory=lambda: deepcopy(_runtime_policy_defaults()["llmBudgetPolicy"]), alias="llmBudgetPolicy")
     dedupe_policy: dict[str, Any] = Field(default_factory=lambda: deepcopy(_runtime_policy_defaults()["dedupePolicy"]), alias="dedupePolicy")
     wyckoff_shortterm: dict[str, Any] = Field(default_factory=lambda: deepcopy(_runtime_policy_defaults()["wyckoffShortterm"]), alias="wyckoffShortterm")
+    # 只存在于 runtimeFlagsJson 里，需要显式声明才不会在 model_dump 时被丢掉。
+    # 缺省 3 与 decision/sizing.py 的 DEFAULT_LEVERAGE 一致：读不到配置时
+    # 往保守一侧倒，杠杆太小只是一单被拒，太大是爆仓。
+    max_leverage: float = Field(default=3.0, alias="maxLeverage")
 
     @model_validator(mode="before")
     @classmethod
@@ -308,6 +316,7 @@ class RuntimeConfig(BaseModel):
         resolved = dict(value)
         runtime_policy = _parse_json_object(resolved.get("runtimeFlagsJson") or resolved.get("runtime_flags_json"))
         direct_policy = {
+            "maxLeverage": resolved.get("maxLeverage") or resolved.get("max_leverage"),
             "triggerMode": resolved.get("triggerMode") or resolved.get("trigger_mode"),
             "marketTrigger": resolved.get("marketTrigger") or resolved.get("market_trigger"),
             "newsTrigger": resolved.get("newsTrigger") or resolved.get("news_trigger"),
@@ -331,6 +340,7 @@ class RuntimeConfig(BaseModel):
         normalized_policy = _normalize_runtime_policy_payload(merged_policy)
         resolved["runtimeFlagsJson"] = json.dumps(normalized_policy, ensure_ascii=True, separators=(",", ":"))
         for key in (
+            "maxLeverage",
             "triggerMode",
             "marketTrigger",
             "newsTrigger",
@@ -350,6 +360,19 @@ class RuntimeConfig(BaseModel):
     def normalize_default_mode(cls, value):
         """标准化默认运行模式"""
         return _normalize_mode(value)
+
+    @field_validator("max_leverage", mode="before")
+    @classmethod
+    def normalize_max_leverage(cls, value):
+        """配置缺失或非法时退回 3 倍。上界的硬夹持在 decision/sizing.py，
+        这里只保证类型与下界。"""
+        if value in (None, ""):
+            return 3.0
+        try:
+            resolved = float(value)
+        except (TypeError, ValueError):
+            return 3.0
+        return resolved if resolved > 0 else 3.0
 
     @field_validator("max_position_ratio", mode="before")
     @classmethod
