@@ -100,7 +100,7 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService
         try
         {
             config = resolveCallableModel(modelId);
-            RuntimeModelCallOutcome outcome = callModelForRuntime(config, prompt);
+            RuntimeModelCallOutcome outcome = callModelForRuntimeWithRetry(config, prompt);
             recordRuntimeAiCall(modelId, config, prompt, outcome, null, System.currentTimeMillis() - startedAt);
             return outcome.payload();
         }
@@ -110,6 +110,94 @@ public class AiModelConfigServiceImpl implements IAiModelConfigService
             log.error("runtime supervisor model call failed", e);
             throw new ServiceException("runtime supervisor model call failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * 带重试的模型调用。
+     *
+     * <p>此前这条链路只调用一次，失败即抛出——而 {@code ai_model_config.retry_times}
+     * 虽有取值（默认 2）却没有任何代码读取它。中转网关的 502/522 抖动因此会直接
+     * 变成一次决策丢失：实测最近两小时 21 次调用失败 5 次，约四分之一的决策
+     * 就这样没有了。
+     *
+     * <p>只对值得重试的失败重试：网络超时、5xx 与 429 是瞬时故障；而认证失败、
+     * 参数错误或「响应缺少内容」重试多少次结果都一样，重试只会放大延迟与开销。
+     * 退避采用 400ms 起的指数增长。
+     */
+    private RuntimeModelCallOutcome callModelForRuntimeWithRetry(AiModelConfig config, String prompt) throws Exception
+    {
+        int configured = config != null && config.getRetryTimes() != null ? config.getRetryTimes() : 0;
+        int maxAttempts = Math.max(1, Math.min(configured, 5) + 1);
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                return callModelForRuntime(config, prompt);
+            }
+            catch (Exception e)
+            {
+                lastError = e;
+                if (attempt >= maxAttempts || !isRetriableModelFailure(e))
+                {
+                    throw e;
+                }
+                long backoffMs = 400L * (1L << (attempt - 1));
+                log.warn("runtime model call attempt {}/{} failed ({}), retrying in {}ms",
+                    attempt, maxAttempts, e.getMessage(), backoffMs);
+                try
+                {
+                    Thread.sleep(backoffMs);
+                }
+                catch (InterruptedException ie)
+                {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+        throw lastError == null ? new ServiceException("runtime model call failed") : lastError;
+    }
+
+    /** 瞬时故障才值得重试；配置类错误重试多少次都一样。 */
+    private boolean isRetriableModelFailure(Throwable error)
+    {
+        for (Throwable cause = error; cause != null; cause = cause.getCause())
+        {
+            if (cause instanceof java.net.SocketTimeoutException
+                || cause instanceof java.net.ConnectException
+                || cause instanceof java.net.UnknownHostException
+                || cause instanceof org.springframework.web.client.ResourceAccessException)
+            {
+                return true;
+            }
+            if (cause instanceof org.springframework.web.client.HttpServerErrorException)
+            {
+                return true;
+            }
+            if (cause instanceof org.springframework.web.client.HttpClientErrorException)
+            {
+                org.springframework.web.client.HttpClientErrorException http =
+                    (org.springframework.web.client.HttpClientErrorException) cause;
+                return http.getStatusCode().value() == 429;
+            }
+            String message = cause.getMessage();
+            if (message != null)
+            {
+                // 认证与参数问题重试无意义
+                if (message.contains("API key must not be empty"))
+                {
+                    return false;
+                }
+                if (message.contains("model call failed: 5") || message.contains("Bad Gateway")
+                    || message.contains("Gateway Time-out") || message.contains("Service Unavailable")
+                    || message.contains("522") || message.contains("524"))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private RuntimeModelCallOutcome callModelForRuntime(AiModelConfig config, String prompt) throws Exception
