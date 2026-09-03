@@ -8,6 +8,9 @@
         </div>
       </template>
       <el-table :data="fills" v-loading="loading">
+        <template #empty>
+          <table-state :error="loadError" @retry="loadFills" />
+        </template>
         <el-table-column prop="createdAt" label="时间" min-width="168" />
         <el-table-column prop="traceId" label="追踪ID" min-width="180" />
         <el-table-column prop="orderRef" label="订单引用" min-width="160" />
@@ -59,6 +62,8 @@ import { listRuntimeFills } from '@/api/dca/tradeExecution'
 
 /** 加载状态 */
 const loading = ref(false)
+/** 上一次加载的失败信息；为空表示这次是正常的「无数据」 */
+const loadError = ref('')
 /** 成交列表数据 */
 const fills = ref([])
 /** 总记录数 */
@@ -75,6 +80,7 @@ const queryParams = reactive({
  */
 async function loadFills() {
   loading.value = true
+  loadError.value = ''
   try {
     const response = await listRuntimeFills(queryParams)
     fills.value = extractFillRows(response)
@@ -82,6 +88,8 @@ async function loadFills() {
   } catch (error) {
     fills.value = []
     total.value = 0
+    // 记下来交给 <table-state> 展示，别让失败伪装成空数据
+    loadError.value = error?.message || error?.msg || '请求失败'
   } finally {
     loading.value = false
   }

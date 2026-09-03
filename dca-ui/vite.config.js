@@ -31,12 +31,31 @@ export default defineConfig(({ mode, command }) => {
       sourcemap: command === 'build' ? false : 'inline',
       outDir: 'dist',
       assetsDir: 'assets',
-      chunkSizeWarningLimit: 2000,
+      // 阈值从 2000 收紧到 700：拆分后入口应当明显低于这个线，
+      // 再超过就说明又有大依赖被塞回首屏了，构建时就该报出来。
+      chunkSizeWarningLimit: 700,
       rollupOptions: {
         output: {
           chunkFileNames: 'static/js/[name]-[hash].js',
           entryFileNames: 'static/js/[name]-[hash].js',
-          assetFileNames: 'static/[ext]/[name]-[hash].[ext]'
+          assetFileNames: 'static/[ext]/[name]-[hash].[ext]',
+          /* 默认所有依赖都跟业务代码打成一个 1.5MB 的整块：改一行业务代码
+             哈希就变，用户每次发版都要把 Element Plus 和 Vue 运行时重下一遍。
+             把这几个框架级依赖单独拎出来，版本锁在 package.json 里、几乎不动，
+             哈希稳定，跨版本发布能一直命中浏览器缓存。
+
+             注意必须是「一个」chunk，不能按 vue / element-plus 再拆细：
+             element-plus 与 Vue 运行时之间存在跨模块的循环引用，拆成两块之后
+             Rollup 生成的求值顺序会让 element-plus 在 vendor-vue 初始化完成前
+             就去取它的绑定，页面直接白屏在
+             ReferenceError: Cannot access 'Y' before initialization。
+             合成一块就没有跨 chunk 的边，问题自然不存在。 */
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            if (/[\\/]node_modules[\\/](element-plus|@element-plus|vue|vue-router|pinia|@vue)[\\/]/.test(id)) {
+              return 'vendor'
+            }
+          }
         }
       }
     },

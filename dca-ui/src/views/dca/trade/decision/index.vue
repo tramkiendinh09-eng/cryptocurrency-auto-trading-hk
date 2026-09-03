@@ -34,6 +34,9 @@
         </el-form-item>
       </el-form>
       <el-table :data="decisionRuns" v-loading="loading">
+        <template #empty>
+          <table-state :error="loadError" @retry="loadDecisionRuns" />
+        </template>
         <el-table-column prop="traceId" label="追踪ID" min-width="180" />
         <el-table-column prop="symbol" label="交易对" width="120" />
         <el-table-column label="模式" width="120">
@@ -561,6 +564,8 @@ import { dispatchReplay, getReplayComparison, listReplaySessions } from '@/api/d
 import { executionStatusTag, orderStatusTag } from '@/utils/tradeExecutionStatus'
 
 const loading = ref(false)
+/** 上一次加载的失败信息；为空表示这次是正常的「无数据」 */
+const loadError = ref('')
 const decisionRuns = ref([])
 const total = ref(0)
 const replayLoading = ref(false)
@@ -598,6 +603,7 @@ const orderStatusOptions = [
 
 async function loadDecisionRuns() {
   loading.value = true
+  loadError.value = ''
   try {
     const response = await listDecisionRuns(buildDecisionQuery(queryParams))
     decisionRuns.value = response?.rows || response?.data || []
@@ -605,6 +611,8 @@ async function loadDecisionRuns() {
   } catch (error) {
     decisionRuns.value = []
     total.value = 0
+    // 记下来交给 <table-state> 展示，别让失败伪装成空数据
+    loadError.value = error?.message || error?.msg || '请求失败'
   } finally {
     loading.value = false
   }

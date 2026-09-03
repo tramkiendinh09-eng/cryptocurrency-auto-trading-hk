@@ -9,8 +9,11 @@
     </template>
 
     <div class="right-menu">
+      <!-- 搜索移到条件之外：窄屏的侧边栏是抽屉，要翻到某个页面得先展开
+           抽屉再逐级点开，搜索恰恰是这里最短的路径，不该被藏起来。 -->
+      <header-search id="header-search" class="right-menu-item" />
+
       <template v-if="appStore.device !== 'mobile'">
-        <header-search id="header-search" class="right-menu-item" />
         <screenfull id="screenfull" class="right-menu-item hover-effect" />
 
         <el-tooltip content="主题模式" effect="dark" placement="bottom">

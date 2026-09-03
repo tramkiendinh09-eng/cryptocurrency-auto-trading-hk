@@ -8,6 +8,9 @@
         </div>
       </template>
       <el-table :data="riskHits" v-loading="loading">
+        <template #empty>
+          <table-state :error="loadError" @retry="loadRiskHits" />
+        </template>
         <el-table-column prop="createdAt" label="时间" min-width="168" />
         <el-table-column prop="traceId" label="追踪ID" min-width="180" />
         <el-table-column prop="ruleCode" label="规则编码" min-width="180" />
@@ -58,6 +61,8 @@ import { listRuntimeRiskHits } from '@/api/dca/tradeExecution'
 
 /** 加载状态 */
 const loading = ref(false)
+/** 上一次加载的失败信息；为空表示这次是正常的「无数据」 */
+const loadError = ref('')
 /** 风控命中列表数据 */
 const riskHits = ref([])
 /** 总记录数 */
@@ -74,6 +79,7 @@ const queryParams = reactive({
  */
 async function loadRiskHits() {
   loading.value = true
+  loadError.value = ''
   try {
     const response = await listRuntimeRiskHits(queryParams)
     riskHits.value = extractRiskHitRows(response)
@@ -81,6 +87,8 @@ async function loadRiskHits() {
   } catch (error) {
     riskHits.value = []
     total.value = 0
+    // 记下来交给 <table-state> 展示，别让失败伪装成空数据
+    loadError.value = error?.message || error?.msg || '请求失败'
   } finally {
     loading.value = false
   }

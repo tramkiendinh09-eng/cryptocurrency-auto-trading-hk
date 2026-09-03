@@ -1,6 +1,11 @@
 <template>
   <div class="header-search">
-    <svg-icon class-name="search-icon" icon-class="search" @click.stop="click" />
+    <el-tooltip :content="`搜索页面（${shortcutLabel}）`" effect="dark" placement="bottom">
+      <div class="search-trigger" @click.stop="click">
+        <svg-icon class-name="search-icon" icon-class="search" />
+        <span class="search-kbd">{{ shortcutLabel }}</span>
+      </div>
+    </el-tooltip>
     <el-dialog
       v-model="show"
       width="600"
@@ -15,7 +20,7 @@
         size="large"
         @input="querySearch"
         prefix-icon="Search"
-        placeholder="菜单搜索，支持标题、URL模糊查询"
+        placeholder="搜索页面：可输入标题、路径，或用空格分隔多个关键词"
         clearable
         @keyup.enter="selectActiveResult"
         @keydown.up.prevent="navigateResult('up')"
@@ -71,10 +76,57 @@
         <span class="shortcut-item">
           <kbd>Esc</kbd> 关闭
         </span>
+        <span class="shortcut-item shortcut-hint">
+          随处按 <kbd>{{ shortcutLabel }}</kbd> 唤起
+        </span>
       </div>
     </el-dialog>
   </div>
 </template>
+
+<script>
+/**
+ * 菜单搜索的排序规则。抽成纯函数是为了能单独测 —— 组件本身要 pinia、
+ * 路由和 Element Plus 才能挂载，而真正容易写错的只有这段匹配。
+ *
+ * 三层由严到松合并，先出现的排前面：
+ *   1) 子串直接命中标题或路径 —— 最确定，用户多半就是要这个
+ *   2) 多关键词全部命中 —— 「通知 模板」这种断续输入
+ *   3) 模糊匹配兜底容错 —— 由调用方传进来
+ *
+ * @param {Array}  pool  候选项，每项形如 { path, title: string[] }
+ * @param {string} query 用户输入
+ * @param {Array}  fuzzy 模糊匹配的结果，可为空
+ * @returns {Array} 去重后的结果
+ */
+export function rankSearchResults(pool, query, fuzzy = []) {
+  const raw = String(query || '').trim()
+  if (raw === '') return pool
+
+  const q = raw.toLowerCase()
+  const tokens = q.split(/\s+/).filter(Boolean)
+  const hay = (item) => ((item.title || []).join(' ') + ' ' + item.path).toLowerCase()
+
+  const exact = pool.filter((item) => hay(item).includes(q))
+  const everyToken = tokens.length > 1
+    ? pool.filter((item) => tokens.every((t) => hay(item).includes(t)))
+    : []
+
+  const merged = []
+  const seen = new Set()
+  for (const item of [...exact, ...everyToken, ...fuzzy]) {
+    if (seen.has(item.path)) continue
+    seen.add(item.path)
+    merged.push(item)
+  }
+  return merged
+}
+
+/** 把用户输入切成高亮用的关键词 */
+export function highlightTokens(query) {
+  return String(query || '').trim().split(/\s+/).filter(Boolean)
+}
+</script>
 
 <script setup>
 import Fuse from 'fuse.js'
@@ -85,7 +137,6 @@ import usePermissionStore from '@/store/modules/permission'
 
 const search = ref('')
 const options = ref([])
-const searchPool = ref([])
 const activeIndex = ref(-1)
 const show = ref(false)
 const fuse = ref(undefined)
@@ -184,22 +235,10 @@ function generateRoutes(routes, basePath = '', prefixTitle = []) {
 
 function querySearch(query) {
   activeIndex.value = -1
-  if (query !== '') {
-    const q = query.toLowerCase()
-    const pathMatches = searchPool.value.filter(item =>
-      item.path.toLowerCase().includes(q)
-    )
-    const fuseMatches = fuse.value.search(query).map(item => item.item)
-    const merged = [...pathMatches]
-    fuseMatches.forEach(item => {
-      if (!merged.find(m => m.path === item.path)) {
-        merged.push(item)
-      }
-    })
-    options.value = merged
-  } else {
-    options.value = searchPool.value
-  }
+  /* 原来只按路径做子串匹配，标题得靠 fuse 去碰，而 threshold 又是 0.2，
+     收得很紧 —— 输「持仓」这类词经常一条都出不来。 */
+  const fuzzy = fuse.value ? fuse.value.search(String(query || '').trim()).map((r) => r.item) : []
+  options.value = rankSearchResults(searchPool.value, query, fuzzy)
 }
 
 function activeStyle(index) {
@@ -226,9 +265,10 @@ function selectActiveResult() {
 
 function highlightText(text) {
   if (!text) return ''
-  if (!search.value) return text
-  const keyword = escapeRegExp(search.value)
-  const reg = new RegExp(`(${keyword})`, 'gi')
+  // 多关键词时逐个高亮，否则用户看不出哪个词命中了哪一段
+  const parts = highlightTokens(search.value).map(escapeRegExp)
+  if (!parts.length) return text
+  const reg = new RegExp(`(${parts.join('|')})`, 'gi')
   return text.replace(reg, '<span class="highlight">$1</span>')
 }
 
@@ -236,13 +276,31 @@ function escapeRegExp(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-onMounted(() => {
-  searchPool.value = generateRoutes(routes.value)
-})
+/* 原来是 onMounted 时抓一次快照。动态路由是登录后才注册的，组件挂载和路由
+   就位的先后顺序没有保证，抓早了搜索池就永远是空的。改成跟着路由算，
+   顺带让「菜单改了要重新登录才能搜到」这种问题不再出现。 */
+const searchPool = computed(() => generateRoutes(routes.value))
 
 watch(searchPool, (list) => {
   initFuse(list)
-})
+  options.value = list
+}, { immediate: true })
+
+/* Mac 上是 ⌘K，其余平台 Ctrl+K —— 和绝大多数工具的习惯保持一致。 */
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const shortcutLabel = computed(() => (isMac ? '⌘K' : 'Ctrl+K'))
+
+function onGlobalKeydown(e) {
+  if (e.key !== 'k' && e.key !== 'K') return
+  if (!(e.metaKey || e.ctrlKey)) return
+  // 浏览器自己不占用 Ctrl+K / ⌘K 的场景下才拦，另外别打断正在输入的人
+  e.preventDefault()
+  show.value = true
+  options.value = searchPool.value
+}
+
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <style lang='scss' scoped>
@@ -261,11 +319,38 @@ watch(searchPool, (list) => {
 }
 
 .header-search {
-  .search-icon {
+  .search-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     cursor: pointer;
+    padding: 0 4px;
+  }
+
+  .search-icon {
     font-size: 18px;
     vertical-align: middle;
   }
+
+  // 快捷键提示：窄屏放不下就收起来，只留图标
+  .search-kbd {
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 5px;
+    border: 1px solid var(--el-border-color, #dcdfe6);
+    border-radius: 4px;
+    color: var(--el-text-color-secondary, #909399);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 992px) {
+    .search-kbd { display: none; }
+  }
+}
+
+.search-footer .shortcut-hint {
+  margin-left: auto;
+  color: #bbb;
 }
 
 .result-count {

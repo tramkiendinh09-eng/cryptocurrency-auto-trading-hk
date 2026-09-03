@@ -8,6 +8,9 @@
         </div>
       </template>
       <el-table :data="positions" v-loading="loading">
+        <template #empty>
+          <table-state :error="loadError" @retry="loadPositions" />
+        </template>
         <el-table-column prop="exchangeCode" label="交易所" width="120" />
         <el-table-column prop="symbol" label="交易对" width="120" />
         <el-table-column label="方向" width="100">
@@ -104,6 +107,8 @@ import { listRuntimePositions } from '@/api/dca/tradeExecution'
 
 /** 加载状态 */
 const loading = ref(false)
+/** 上一次加载的失败信息；为空表示这次是正常的「无数据」 */
+const loadError = ref('')
 /** 持仓列表数据 */
 const positions = ref([])
 /** 总记录数 */
@@ -120,6 +125,7 @@ const queryParams = reactive({
  */
 async function loadPositions() {
   loading.value = true
+  loadError.value = ''
   try {
     const response = await listRuntimePositions(queryParams)
     positions.value = extractPositionRows(response)
@@ -127,6 +133,8 @@ async function loadPositions() {
   } catch (error) {
     positions.value = []
     total.value = 0
+    // 记下来交给 <table-state> 展示，别让失败伪装成空数据
+    loadError.value = error?.message || error?.msg || '请求失败'
   } finally {
     loading.value = false
   }

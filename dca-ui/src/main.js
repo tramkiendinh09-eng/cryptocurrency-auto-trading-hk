@@ -1,4 +1,4 @@
-import { createApp } from 'vue'
+import { createApp, defineAsyncComponent } from 'vue'
 
 import Cookies from 'js-cookie'
 
@@ -33,16 +33,20 @@ import { parseTime, resetForm, addDateRange, handleTree, selectDictLabel, select
 import Pagination from '@/components/Pagination'
 // 自定义表格工具组件
 import RightToolbar from '@/components/RightToolbar'
-// 富文本组件
-import Editor from "@/components/Editor"
-// 文件上传组件
-import FileUpload from "@/components/FileUpload"
-// 图片上传组件
-import ImageUpload from "@/components/ImageUpload"
-// 图片预览组件
-import ImagePreview from "@/components/ImagePreview"
 // 字典标签组件
 import DictTag from '@/components/DictTag'
+// 表格空状态 / 加载失败状态
+import TableState from '@/components/TableState'
+
+/* 富文本 / 上传 / 预览四个组件仍然全局注册，模板里的写法一个字都不用改，
+   但改成按需加载。它们同步引入时会把各自的依赖压进首屏入口包，而实际用到
+   的页面极少 —— <editor> 背后是整个 Quill 编辑器，全站只有「通知公告」一个
+   页面在用；三个上传/预览组件在交易控制台里一次都没出现。首屏为它们付出的
+   下载时间，对着实盘盯盘的人来说是白等。 */
+const Editor = defineAsyncComponent(() => import('@/components/Editor'))
+const FileUpload = defineAsyncComponent(() => import('@/components/FileUpload'))
+const ImageUpload = defineAsyncComponent(() => import('@/components/ImageUpload'))
+const ImagePreview = defineAsyncComponent(() => import('@/components/ImagePreview'))
 
 const app = createApp(App)
 
@@ -64,6 +68,7 @@ app.component('FileUpload', FileUpload)
 app.component('ImageUpload', ImageUpload)
 app.component('ImagePreview', ImagePreview)
 app.component('RightToolbar', RightToolbar)
+app.component('TableState', TableState)
 app.component('Editor', Editor)
 
 app.use(router)
