@@ -158,7 +158,11 @@ def _resolve_supervisor_policy_mode(state: DecisionState) -> str:
         or policy.get("mode")
         or ""
     ).strip().upper()
-    return normalized if normalized in _SUPERVISOR_POLICY_MODES else "LLM_ALLOWED"
+    # 缺省是 EVENT_GATED 而不是 LLM_ALLOWED。后者会让 _supervisor_stage_enabled
+    # 直接返回 llm_dispatch_allowed()，于是 RULE_ONLY 下主管阶段整个被关掉，
+    # 下面那段规则基线在名为"仅规则"的模式里成了死代码——线上 24 小时
+    # 13053 次 RULE_ONLY 决策，无一例外 SKIP/dispatch_not_allowed。
+    return normalized if normalized in _SUPERVISOR_POLICY_MODES else "EVENT_GATED"
 
 
 def _supervisor_stage_enabled(state: DecisionState) -> bool:
@@ -208,13 +212,14 @@ def _build_ai_fail_closed_decision(
     )
 
 
-def _supervisor_ai_fail_open_enabled(state: DecisionState) -> bool:
+def _supervisor_runtime_flags(state: DecisionState) -> dict:
+    """取合并后的 runtime flags。
+
+    直接写的 runtime_flags 覆盖 runtime_flags_json 里的同名键，两处都可能缺。
+    """
     runtime_config = state.get("runtime_config") or {}
     if not isinstance(runtime_config, dict):
-        return False
-    effective_mode = str(state.get("effective_mode") or state.get("mode") or "").strip().lower()
-    if effective_mode not in {"paper", "shadow", ""}:
-        return False
+        return {}
     runtime_flags = runtime_config.get("runtime_flags")
     if not isinstance(runtime_flags, dict):
         runtime_flags = {}
@@ -226,6 +231,103 @@ def _supervisor_ai_fail_open_enabled(state: DecisionState) -> bool:
             parsed_runtime_flags = {}
         if isinstance(parsed_runtime_flags, dict):
             runtime_flags = {**parsed_runtime_flags, **runtime_flags}
+    return runtime_flags
+
+
+#: 规则基线动作的门槛。基线只看四个观点的多空得分，而行情观点在价格变动
+#: 超过 0.1% 时就会取向——没有门槛的话它几乎每一跳都会给出一个动作。
+_DEFAULT_BASELINE_POLICY = {
+    # 规则基线能不能自己开仓。默认关：开仓是加风险敞口，交给模型判断；
+    # 平仓/减仓是降风险，基线可以做。保护性平仓另有 position_risk_watcher
+    # 那条确定性路径，不依赖这里。
+    "entriesEnabled": False,
+    "minConfidence": 65,
+    # 胜方得分要领先多少（占多空总分的百分比）才算有边际。51 比 49 不是边际。
+    "minScoreMarginPct": 20,
+}
+
+
+def _resolve_baseline_policy(state: DecisionState) -> dict:
+    policy = dict(_DEFAULT_BASELINE_POLICY)
+    candidate = _supervisor_runtime_flags(state).get("baselinePolicy")
+    if isinstance(candidate, dict):
+        policy.update({key: value for key, value in candidate.items() if value is not None})
+    return {
+        "entries_enabled": _is_enabled_flag(policy.get("entriesEnabled"), default=False),
+        "min_confidence": _safe_float(policy.get("minConfidence"), 65.0),
+        "min_score_margin_pct": _safe_float(policy.get("minScoreMarginPct"), 20.0),
+    }
+
+
+def _apply_baseline_policy(
+    state: DecisionState,
+    decision_payload: dict,
+    bullish_score: int,
+    bearish_score: int,
+) -> dict:
+    """给规则基线的动作加门槛。
+
+    基线本身只是"谁的加权得分高就往哪边动"，没有任何边际要求：行情规则观点
+    在 |涨跌| >= 0.1% 时就会取向，所以不加门槛的话，RULE_ONLY 一放开就会在
+    几乎每一次决策上给出动作。
+
+    保护路径不受这里约束：position_risk 已经把这笔仓位标成 reduce/close 时
+    直接放行，让 _apply_exit_escalation 能照常升级；而 hardClose 那条更是
+    完全不经过主管。
+    """
+    payload = dict(decision_payload or {})
+    action = str(payload.get("action") or "").strip().upper()
+    if action in {"", "SKIP", "NO_ACTION"}:
+        return payload
+
+    risk_severity = str((state.get("position_risk_result") or {}).get("severity") or "").strip().lower()
+    if risk_severity in {"reduce", "close"}:
+        return payload
+
+    total_score = max(0, int(bullish_score)) + max(0, int(bearish_score))
+    # 观点真的对立时的 REDUCE 是"信号打架就减风险"，本身是降风险动作，不受
+    # 边际门槛约束。但要和另一种平局分开：四个观点全中性时两边都是 0，
+    # _resolve_action_and_side 同样会走到 REDUCE 分支——那不是对立，是没有
+    # 信息，而 RULE_ONLY 下这种安静的决策每天上万次，不挡就会一直削仓。
+    if action == "REDUCE" and total_score > 0:
+        return payload
+
+    policy = _resolve_baseline_policy(state)
+    blocked = ""
+    if action in {"OPEN_LONG", "OPEN_SHORT", "ADD_LONG", "ADD_SHORT"} and not policy["entries_enabled"]:
+        blocked = "baseline_entries_disabled"
+    else:
+        confidence = _safe_float(payload.get("confidence"), 0.0)
+        margin_pct = (abs(bullish_score - bearish_score) / total_score * 100.0) if total_score > 0 else 0.0
+        if confidence < policy["min_confidence"]:
+            blocked = f"baseline_confidence_{confidence:.0f}_below_{policy['min_confidence']:.0f}"
+        elif margin_pct < policy["min_score_margin_pct"]:
+            blocked = f"baseline_margin_{margin_pct:.0f}pct_below_{policy['min_score_margin_pct']:.0f}pct"
+    if not blocked:
+        return payload
+
+    # 有仓位就 HOLD（什么都不做，但如实说明还持着），没仓位就 SKIP。
+    holding_side = _current_position_side(state)
+    if _has_active_position(state) and holding_side in {"long", "short"}:
+        payload["action"] = "HOLD"
+        payload["side"] = holding_side
+    else:
+        payload["action"] = "SKIP"
+        payload["side"] = "flat"
+    payload["size_hint"] = 0.0
+    summary_reason = str(payload.get("summary_reason") or "").strip()
+    payload["summary_reason"] = f"{summary_reason}; {blocked}" if summary_reason else blocked
+    return payload
+
+
+def _supervisor_ai_fail_open_enabled(state: DecisionState) -> bool:
+    runtime_config = state.get("runtime_config") or {}
+    if not isinstance(runtime_config, dict):
+        return False
+    effective_mode = str(state.get("effective_mode") or state.get("mode") or "").strip().lower()
+    if effective_mode not in {"paper", "shadow", ""}:
+        return False
+    runtime_flags = _supervisor_runtime_flags(state)
     for flag_value in (
         runtime_config.get("supervisor_ai_fail_open"),
         runtime_config.get("supervisorAiFailOpen"),
@@ -1493,7 +1595,11 @@ def supervisor_agent(state: DecisionState) -> DecisionState:
                     ).model_dump(),
                     prompt_request.get("metadata") or {},
                 )
-        elif supervisor_policy_mode == "LLM_ALLOWED":
+        elif not _supervisor_ai_fail_open_enabled(state):
+            # 该用模型、模型却不可用时如实说明，不要静默退回规则基线。
+            # 这里此前判的是 supervisor_policy_mode == "LLM_ALLOWED"，而策略
+            # 缺省值一改这条就失效了——策略模式管"主管阶段跑不跑"，
+            # 要不要退回规则由 fail-open 一个开关说了算，两件事不该缠在一起。
             return _set_supervisor_decision(
                 state,
                 _build_model_unavailable_decision(ai_model_config).model_dump(),
@@ -1540,8 +1646,9 @@ def supervisor_agent(state: DecisionState) -> DecisionState:
         "model_code": str(ai_model_config.get("model_code") or "").strip(),
         "model_provider": str(ai_model_config.get("provider") or "").strip(),
     }
+    gated_payload = _apply_baseline_policy(state, decision_payload, bullish_score, bearish_score)
     return _set_supervisor_decision(
         state,
-        _clamp_size_hint(state, _apply_exit_escalation(state, decision_payload)),
+        _clamp_size_hint(state, _apply_exit_escalation(state, gated_payload)),
         prompt_request.get("metadata") or {},
     )

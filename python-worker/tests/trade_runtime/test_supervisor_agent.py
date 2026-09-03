@@ -3,8 +3,17 @@ import json
 from trade_runtime.decision.nodes.supervisor_agent import supervisor_agent
 
 
+
+# 规则基线默认不自己开仓（baselinePolicy.entriesEnabled=False，见
+# supervisor_agent._DEFAULT_BASELINE_POLICY）。下面这些用例断言的是基线的
+# 多空聚合与 fail-open 链路本身，需要它真的产出一笔 OPEN，所以显式打开这个
+# 开关。门槛本身由 TestBaselineEntryGate 守着。
+_BASELINE_ENTRIES_ON = {"runtime_flags": {"baselinePolicy": {"entriesEnabled": True}}}
+_ENTRIES_ON_FLAG = {"baselinePolicy": {"entriesEnabled": True}}
+
 def test_supervisor_agent_opens_long_when_bullish_views_dominate():
     state = {
+        "runtime_config": _BASELINE_ENTRIES_ON,
         "dispatch_mode": "LLM_ALLOWED",
         "market_view": {"bias": "bullish", "confidence": 80, "reason": "price_breakout"},
         "news_view": {"bias": "bullish", "confidence": 90, "reason": "ETF inflow"},
@@ -132,6 +141,7 @@ def test_supervisor_agent_skips_when_ai_model_config_is_disabled():
 
 def test_supervisor_agent_uses_rule_aggregation_when_rule_only_policy_enables_supervisor():
     state = {
+        "runtime_config": _BASELINE_ENTRIES_ON,
         "dispatch_mode": "RULE_ONLY",
         "market_view": {"bias": "bullish", "confidence": 88, "reason": "price_breakout"},
         "news_view": {"bias": "bullish", "confidence": 76, "reason": "ETF inflow"},
@@ -308,7 +318,11 @@ def test_supervisor_agent_can_fall_back_to_rule_decision_after_model_failure():
 
     state = {
         "dispatch_mode": "LLM_ALLOWED",
-        "runtime_config": {"supervisor_ai_fail_open": True, "max_position_ratio": 0.25},
+        "runtime_config": {
+            "supervisor_ai_fail_open": True,
+            "max_position_ratio": 0.25,
+            "runtime_flags": _ENTRIES_ON_FLAG,
+        },
         "account_equity": 10000.0,
         "current_position_side": "flat",
         "current_position_quantity": 0.0,
@@ -2169,7 +2183,9 @@ def test_supervisor_ai_fail_open_only_when_runtime_flag_enabled():
         "exchange": "okx",
         "dispatch_mode": "LLM_ALLOWED",
         "ai_call_failed": True,
-        "runtime_config": {"runtime_flags": {"supervisorAiFailOpen": True}},
+        "runtime_config": {
+            "runtime_flags": {"supervisorAiFailOpen": True, **_ENTRIES_ON_FLAG},
+        },
         "strategy_context": {"ai_model_config": {"id": 8, "model_code": "gpt-5.5", "provider": "openai"}},
         "market_view": {"bias": "bullish", "confidence": 75, "reason": "market confirms"},
         "news_view": {"bias": "bullish", "confidence": 75, "reason": "news supports"},
@@ -2241,7 +2257,10 @@ def test_supervisor_ai_fail_open_reads_runtime_flags_json_string():
         "effective_mode": "paper",
         "dispatch_mode": "LLM_ALLOWED",
         "ai_call_failed": True,
-        "runtime_config": {"runtimeFlagsJson": '{"supervisorAiFailOpen":true}'},
+        "runtime_config": {
+            "runtimeFlagsJson": '{"supervisorAiFailOpen":true,'
+            '"baselinePolicy":{"entriesEnabled":true}}'
+        },
         "strategy_context": {"ai_model_config": {"id": 8, "model_code": "gpt-5.5", "provider": "openai"}},
         "market_view": {"bias": "bullish", "confidence": 75, "reason": "market confirms"},
         "news_view": {"bias": "bullish", "confidence": 75, "reason": "news supports"},
@@ -2329,3 +2348,189 @@ def test_normalize_recent_supervisor_decisions_filters_empty_rule_only_records()
     assert result[0]["summary_reason"] == "valid_reason"
     assert result[1]["summary_reason"] == "hold_reason"
     assert result[2]["summary_reason"] == "zero_confidence_but_has_reason"
+
+
+# ----------------------------------------------------------------------
+# 规则基线：RULE_ONLY 此前在主管入口就被关掉了
+# ----------------------------------------------------------------------
+
+
+def _baseline_state(**overrides):
+    """一面倒看多的观点。规则基线本该给出 OPEN_LONG。"""
+    state = {
+        "symbol": "MUUSDT",
+        "exchange": "binance",
+        "mode": "paper",
+        "effective_mode": "paper",
+        "account_equity": 100.0,
+        "dispatch_mode": "RULE_ONLY",
+        "runtime_config": {"max_position_ratio": 0.8, "maxLeverage": 12, "minPositionRatio": 0.05},
+        "strategy_context": {},
+        "market_view": {"bias": "bullish", "confidence": 70, "reason": "price_change_pct=2.9"},
+        "news_view": {"bias": "bullish", "confidence": 65, "reason": "headline"},
+        "onchain_view": {},
+        "social_view": {},
+        "current_position_side": "flat",
+        "current_position_quantity": 0.0,
+    }
+    state.update(overrides)
+    return state
+
+
+def _flags(state, **baseline):
+    cfg = dict(state["runtime_config"])
+    cfg["runtime_flags"] = {"baselinePolicy": baseline}
+    state["runtime_config"] = cfg
+    return state
+
+
+def _decide(state):
+    from trade_runtime.decision.nodes.supervisor_agent import supervisor_agent
+
+    return (supervisor_agent(dict(state)).get("supervisor_decision") or {})
+
+
+class TestSupervisorReachesTheRuleBaseline:
+    """RULE_ONLY 下主管阶段此前整个被跳过。
+
+    _resolve_supervisor_policy_mode 在没配 supervisor_policy 时返回
+    LLM_ALLOWED，而该分支直接 return llm_dispatch_allowed()——RULE_ONLY 下
+    必然 False。于是那段按多空得分算动作的规则基线，在名为"仅规则"的模式里
+    是死代码：线上 24 小时 13053 次 RULE_ONLY 决策，无一例外
+    SKIP/dispatch_not_allowed。缺省改成 EVENT_GATED。
+    """
+
+    def test_default_policy_is_event_gated(self):
+        from trade_runtime.decision.nodes.supervisor_agent import _resolve_supervisor_policy_mode
+
+        assert _resolve_supervisor_policy_mode({}) == "EVENT_GATED"
+
+    def test_rule_only_now_enters_the_supervisor_stage(self):
+        from trade_runtime.decision.nodes.supervisor_agent import _supervisor_stage_enabled
+
+        assert _supervisor_stage_enabled(_baseline_state()) is True
+
+    def test_no_dispatch_is_still_skipped(self):
+        from trade_runtime.decision.nodes.supervisor_agent import _supervisor_stage_enabled
+
+        assert _supervisor_stage_enabled(_baseline_state(dispatch_mode="NO_DISPATCH")) is False
+
+    def test_rule_only_no_longer_reports_dispatch_not_allowed(self):
+        d = _decide(_baseline_state())
+        assert "dispatch_not_allowed" not in str(d.get("summary_reason") or "")
+
+
+class TestBaselineEntryGate:
+    """基线只看"谁的得分高"，没有边际要求；行情规则观点在 |涨跌| >= 0.1%
+    时就取向，所以不加门槛的话 RULE_ONLY 一放开就会在几乎每一跳给出动作。
+    """
+
+    def test_entries_are_off_by_default(self):
+        d = _decide(_baseline_state())
+        assert d["action"] == "SKIP"
+        assert "baseline_entries_disabled" in d["summary_reason"]
+
+    def test_entries_can_be_enabled(self):
+        d = _decide(_flags(_baseline_state(), entriesEnabled=True))
+        assert d["action"] == "OPEN_LONG"
+        assert d["side"] == "long"
+        assert d["size_hint"] > 0
+
+    def test_confidence_below_threshold_blocks(self):
+        state = _flags(_baseline_state(), entriesEnabled=True, minConfidence=90)
+        d = _decide(state)
+        assert d["action"] == "SKIP"
+        assert "baseline_confidence_" in d["summary_reason"]
+
+    def test_a_thin_margin_blocks(self):
+        """51 比 49 不是边际。"""
+        state = _baseline_state(
+            market_view={"bias": "bullish", "confidence": 70, "reason": "up"},
+            news_view={"bias": "bearish", "confidence": 66, "reason": "down"},
+        )
+        d = _decide(_flags(state, entriesEnabled=True, minScoreMarginPct=20))
+        assert d["action"] == "SKIP"
+        assert "baseline_margin_" in d["summary_reason"]
+
+    def test_a_wide_margin_passes(self):
+        state = _baseline_state(
+            market_view={"bias": "bullish", "confidence": 80, "reason": "up"},
+            news_view={"bias": "bearish", "confidence": 20, "reason": "down"},
+        )
+        d = _decide(_flags(state, entriesEnabled=True, minScoreMarginPct=20))
+        assert d["action"] == "OPEN_LONG"
+
+
+class TestBaselineExitsAndProtection:
+    def test_exits_are_gated_too_not_just_entries(self):
+        """基线的平仓同样噪声很大：行情观点每翻一次向就要平一次仓，会把
+        持仓打得来回抖。真正的保护性平仓走 position_risk_watcher，不经这里。
+        """
+        state = _baseline_state(
+            current_position_side="long",
+            current_position_quantity=1.0,
+            market_view={"bias": "bearish", "confidence": 51, "reason": "down"},
+            news_view={"bias": "bullish", "confidence": 49, "reason": "up"},
+        )
+        d = _decide(_flags(state, minConfidence=65))
+        assert d["action"] == "HOLD"
+        assert d["side"] == "long"
+        assert "baseline_" in d["summary_reason"]
+
+    def test_a_strong_exit_signal_still_closes(self):
+        state = _baseline_state(
+            current_position_side="long",
+            current_position_quantity=1.0,
+            market_view={"bias": "bearish", "confidence": 85, "reason": "breakdown"},
+            news_view={},
+        )
+        d = _decide(state)
+        assert d["action"] == "CLOSE"
+        assert d["side"] == "long"
+
+    def test_position_risk_bypasses_the_gate_entirely(self):
+        """持仓风险已经把这笔仓位标成 reduce/close 时，基线门槛不该再拦一道
+        ——那是保护路径，且 _apply_exit_escalation 要靠它才能升级成 CLOSE。
+        """
+        state = _baseline_state(
+            current_position_side="long",
+            current_position_quantity=1.0,
+            market_view={"bias": "bearish", "confidence": 51, "reason": "down"},
+            news_view={"bias": "bullish", "confidence": 49, "reason": "up"},
+            position_risk_result={"severity": "close", "reason": "adverse_move_close"},
+        )
+        d = _decide(_flags(state, minConfidence=65))
+        assert d["action"] != "HOLD"
+        assert "baseline_" not in str(d.get("summary_reason") or "")
+
+    def test_a_genuine_conflict_still_reduces(self):
+        """多空得分打平且都非零 = 信号在打架，减仓是降风险动作，不受边际门槛
+        约束。"""
+        state = _baseline_state(
+            current_position_side="long",
+            current_position_quantity=1.0,
+            market_view={"bias": "bullish", "confidence": 60, "reason": "rebound"},
+            news_view={"bias": "bearish", "confidence": 60, "reason": "regulatory"},
+        )
+        d = _decide(state)
+        assert d["action"] == "REDUCE"
+        assert d["side"] == "long"
+
+    def test_all_neutral_views_do_not_reduce(self):
+        """同样落在 _resolve_action_and_side 的平局分支，但两边都是 0——那不是
+        对立，是没有信息。RULE_ONLY 下这种安静的决策每天上万次，不挡就会一直
+        削仓。"""
+        state = _baseline_state(
+            current_position_side="long",
+            current_position_quantity=1.0,
+            market_view={"bias": "neutral", "confidence": 50, "reason": "flat"},
+            news_view={"bias": "neutral", "confidence": 50, "reason": "quiet"},
+        )
+        d = _decide(state)
+        assert d["action"] == "HOLD"
+        assert d["side"] == "long"
+
+    def test_blocked_entry_with_no_position_is_skip_not_hold(self):
+        d = _decide(_baseline_state())
+        assert d["action"] == "SKIP"
+        assert d["side"] == "flat"

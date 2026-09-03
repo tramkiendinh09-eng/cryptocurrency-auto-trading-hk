@@ -2,6 +2,13 @@ from trade_runtime.decision.graph import build_decision_graph
 from trade_runtime.decision.nodes.execution_node import execution_node
 
 
+# 规则基线默认不自己开仓（baselinePolicy.entriesEnabled=False，见
+# supervisor_agent._DEFAULT_BASELINE_POLICY）。下面这些用例靠基线产出一笔
+# OPEN 来驱动执行与回调链路，所以显式打开这个开关——它们测的是执行与回调，
+# 不是基线的门槛，门槛另有 TestBaselineEntryGate 守着。
+_BASELINE_ENTRIES_ON = {"runtime_flags": {"baselinePolicy": {"entriesEnabled": True}}}
+
+
 def test_position_snapshot_callback_includes_trace_id():
     class StubRiskGuard:
         def evaluate(self, **kwargs):
@@ -48,6 +55,7 @@ def test_position_snapshot_callback_includes_trace_id():
     graph.invoke(
         {
             "trace_id": "trace-position-1",
+            "runtime_config": _BASELINE_ENTRIES_ON,
             "symbol": "BTCUSDT",
             "exchange": "binance",
             "event_bundle": [{"event_type": "market_tick", "price": 65000.0}],
@@ -104,6 +112,7 @@ def test_position_snapshot_callback_carries_runtime_user_id_when_available():
     graph.invoke(
         {
             "trace_id": "trace-position-user-1",
+            "runtime_config": _BASELINE_ENTRIES_ON,
             "symbol": "BTCUSDT",
             "exchange": "binance",
             "event_bundle": [{"event_type": "market_tick", "price": 65000.0}],

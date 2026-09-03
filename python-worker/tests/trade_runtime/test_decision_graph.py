@@ -8,6 +8,13 @@ from trade_runtime.decision.nodes.risk_guard_node import risk_guard_node
 from trade_runtime.execution.router import ExecutionRouter
 
 
+# 规则基线默认不自己开仓（baselinePolicy.entriesEnabled=False，见
+# supervisor_agent._DEFAULT_BASELINE_POLICY）。下面这些用例靠基线产出一笔
+# OPEN 来驱动执行与回调链路，所以显式打开这个开关——它们测的是执行与回调，
+# 不是基线的门槛，门槛另有 TestBaselineEntryGate 守着。
+_BASELINE_ENTRIES_ON = {"runtime_flags": {"baselinePolicy": {"entriesEnabled": True}}}
+
+
 def test_strong_event_skips_noise_path_and_reaches_supervisor():
     graph = build_decision_graph()
     result = graph.invoke(
@@ -359,6 +366,7 @@ def test_graph_blocks_execution_when_risk_guard_fails():
     result = graph.invoke(
         {
             "trace_id": "t-3",
+            "runtime_config": _BASELINE_ENTRIES_ON,
             "symbol": "BTCUSDT",
             "exchange": "binance",
             "event_bundle": [{"event_type": "market_tick"}],
@@ -1441,6 +1449,7 @@ def test_graph_executes_paper_order_after_risk_passes():
     result = graph.invoke(
         {
             "trace_id": "t-4",
+            "runtime_config": _BASELINE_ENTRIES_ON,
             "symbol": "BTCUSDT",
             "exchange": "binance",
             "event_bundle": [{"event_type": "market_tick", "price": 65000.0}],
@@ -1525,6 +1534,7 @@ def test_graph_keeps_failed_execution_without_fill_or_position_callbacks():
     result = graph.invoke(
         {
             "trace_id": "t-5",
+            "runtime_config": _BASELINE_ENTRIES_ON,
             "symbol": "BTCUSDT",
             "exchange": "binance",
             "event_bundle": [{"event_type": "market_tick", "price": 65000.0}],
@@ -1597,6 +1607,7 @@ def test_graph_keeps_canceled_execution_without_fill_or_position_callbacks():
     result = graph.invoke(
         {
             "trace_id": "t-5b",
+            "runtime_config": _BASELINE_ENTRIES_ON,
             "symbol": "BTCUSDT",
             "exchange": "binance",
             "event_bundle": [{"event_type": "market_tick", "price": 65000.0}],
@@ -1668,6 +1679,7 @@ def test_graph_keeps_pending_execution_without_fill_or_position_callbacks():
     result = graph.invoke(
         {
             "trace_id": "t-5c",
+            "runtime_config": _BASELINE_ENTRIES_ON,
             "symbol": "BTCUSDT",
             "exchange": "binance",
             "event_bundle": [{"event_type": "market_tick", "price": 65000.0}],
@@ -1761,6 +1773,7 @@ def test_graph_keeps_success_callbacks_after_router_retry_recovers(monkeypatch):
     result = graph.invoke(
         {
             "trace_id": "t-6",
+            "runtime_config": _BASELINE_ENTRIES_ON,
             "symbol": "BTCUSDT",
             "exchange": "binance",
             "event_bundle": [{"event_type": "market_tick", "price": 65000.0}],
