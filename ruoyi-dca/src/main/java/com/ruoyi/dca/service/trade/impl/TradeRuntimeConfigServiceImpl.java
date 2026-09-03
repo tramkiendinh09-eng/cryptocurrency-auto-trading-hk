@@ -932,11 +932,19 @@ public class TradeRuntimeConfigServiceImpl implements ITradeRuntimeConfigService
 
     private MarketDataConfig selectMarketDataConfig(String symbol) {
         if (!isBlank(symbol)) {
-            MarketDataConfig config = marketDataConfigService.selectConfigBySymbol(symbol.trim());
-            if (config != null) {
-                return config;
-            }
+            // 按标的查到就用；查不到只能返回 null。
+            //
+            // 这里曾经回退到 selectEnabledConfigs().get(0)，也就是"第一条启用的
+            // 配置"，不管它属于哪个标的。库里只有 4 个标的配了行情，其余 8 个
+            // 便统统拿到了同一条 SAMSUNG 配置——模型在为 DOGEUSDT 决策时，
+            // 上下文里写着 symbol: SAMSUNGUSDT。而且这份配置还决定
+            // collect_onchain，以及在 symbol_scope 缺失时充当标的名的兜底，
+            // 拿错了不只是显示错。
+            //
+            // 调用方本来就能处理"没有配置"，却无从分辨"别人的配置"。
+            return marketDataConfigService.selectConfigBySymbol(symbol.trim());
         }
+        // 没给标的时（引导阶段）仍取第一条启用配置，此处没有更好的依据。
         List<MarketDataConfig> configs = marketDataConfigService.selectEnabledConfigs();
         return configs == null || configs.isEmpty() ? null : configs.get(0);
     }
