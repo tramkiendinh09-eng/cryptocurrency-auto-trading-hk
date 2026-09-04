@@ -1550,7 +1550,9 @@ def test_inline_supervisor_prompt_requires_canonical_actions_only():
         {"model_code": "gpt-5.5", "provider": "openai"},
     )
 
-    assert "Allowed action values only" in prompt
+    # 措辞在输出契约压缩时从 "Allowed action values only:" 改成 "action is one of"，
+    # 枚举本身一个没少。逐条字面守卫在 test_supervisor_prompt_contract.py。
+    assert "action is one of" in prompt
     assert "OPEN_LONG" in prompt
     assert "OPEN_SHORT" in prompt
     assert "ADD_LONG" in prompt
@@ -1559,7 +1561,7 @@ def test_inline_supervisor_prompt_requires_canonical_actions_only():
     assert "CLOSE" in prompt
     assert "HOLD" in prompt
     assert "SKIP" in prompt
-    assert "Do not return open, open_position, buy, sell, long, short, wait, none, or no_action" in prompt
+    assert "Never return open, open_position, buy, sell, long, short, wait, none or no_action" in prompt
 
 
 def test_inline_supervisor_prompt_warns_against_frequent_post_entry_operations():
@@ -1586,7 +1588,7 @@ def test_inline_supervisor_prompt_warns_against_frequent_post_entry_operations()
     assert "current_position_opened_at" in prompt
     assert "current_time" in prompt
     assert "current_position_holding_minutes" in prompt
-    assert "avoid frequent ADD_LONG, ADD_SHORT, REDUCE, or CLOSE" in prompt
+    assert "avoid frequent ADD_LONG, ADD_SHORT, REDUCE or CLOSE" in prompt
 
 
 def test_inline_supervisor_prompt_includes_previous_supervisor_decisions_duplicate_case():

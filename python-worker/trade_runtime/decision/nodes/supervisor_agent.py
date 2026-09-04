@@ -77,6 +77,12 @@ from trade_runtime.decision.sizing import (
     position_ratio_floor,
     venue_order_floor,
 )
+# 可下仓位区间搬到了 decision/sizing.py：模板渲染上下文也要用同一份实现，
+# 否则内联与模板两条路径会给模型算出不同的区间。这里保留原名以免改动调用点。
+from trade_runtime.decision.sizing import (
+    current_market_price as _current_market_price,
+    sizing_constraints as _sizing_constraints,
+)
 from trade_runtime.decision.output_parsers import parse_json_object_content
 from trade_runtime.decision.state import DecisionState
 from trade_runtime.decision.timestamps import stamp_state_timestamp
@@ -92,6 +98,13 @@ from trade_runtime.prompting.render_context_builder import (
     synchronize_prompt_memory_state,
 )
 from trade_runtime.prompting.renderers import render_template
+# 指令段的正文放在 prompting 下：数据库模板与这里的内联提示词读同一份，
+# 分成两份的话 inline / template 的对照就变成在比措辞。
+from trade_runtime.prompting.supervisor_template import (
+    SUPERVISOR_EMPTY_MEMORY_NOTE,
+    SUPERVISOR_METHODOLOGY,
+    SUPERVISOR_OUTPUT_CONTRACT,
+)
 
 _RECENT_SUPERVISOR_DECISION_LIMIT = 2
 _RECENT_SUPERVISOR_DECISION_TTL_SECONDS = 7200
@@ -634,29 +647,6 @@ def _normalize_model_decision_payload(state: DecisionState, decision_payload: di
     return payload
 
 
-def _current_market_price(state: DecisionState) -> float:
-    feature_snapshot = state.get("feature_snapshot") or {}
-    if isinstance(feature_snapshot, dict):
-        position_context = feature_snapshot.get("position_risk_context") or {}
-        if isinstance(position_context, dict):
-            current_price = _safe_float(position_context.get("current_price"), 0.0)
-            if current_price > 0:
-                return current_price
-        for key in ("effective_price", "latest_price", "price"):
-            current_price = _safe_float(feature_snapshot.get(key), 0.0)
-            if current_price > 0:
-                return current_price
-    events = state.get("event_bundle")
-    if isinstance(events, list):
-        for event in reversed(events):
-            if not isinstance(event, dict):
-                continue
-            current_price = _safe_float(event.get("effective_price") or event.get("price"), 0.0)
-            if current_price > 0:
-                return current_price
-    return 0.0
-
-
 def _has_opposing_consensus(state: DecisionState, position_side: str) -> bool:
     views = [view for view in _collect_views(state) if isinstance(view, dict)]
     bullish_views = [view for view in views if str(view.get("bias") or "").strip().lower() == "bullish"]
@@ -853,74 +843,6 @@ def _market_evidence(state: DecisionState) -> dict:
     return evidence
 
 
-# 交易所对单笔委托的最小名义价值。币安 U 本位合约多数交易对是 5 USDT，
-# 个别是 20。给不出准确值时宁可取大：报小了会让模型开出必然被拒的单子。
-_MIN_ORDER_NOTIONAL_USDT = float(
-    os.getenv("TRADE_RUNTIME_MIN_ORDER_NOTIONAL_USDT", "5") or 5
-)
-
-
-def _sizing_constraints(state: DecisionState, runtime_config: dict) -> dict:
-    """算出这一刻、这个标的真正可下的仓位区间。
-
-    口径与 decision/sizing.py 完全一致（同一份实现），否则模型会按一个
-    区间给值、风控和下单却按另一个算，出现"照着提示给的数反而被拒"。
-
-    杠杆在这里是有用的：size_hint 是动用多少权益作为保证金，敞口是它乘
-    杠杆，所以杠杆越高、能满足交易所最小下单额的 size_hint 下界越低。
-
-    最小下单额必须按标的取。此前这里用的是一个全局常量 5 USDT，而实测
-    ETH 的真实下限是 21.6——模型照着 5 给 ETH 定了 10 和 15 USDT 两单，
-    建好、发出、被交易所过滤器静默拒掉，两次有效信号就这么没了。
-    """
-    equity = _safe_float(state.get("account_equity"), 0.0)
-    max_ratio = _safe_float(runtime_config.get("max_position_ratio"), 0.0)
-    ceiling = leverage_ceiling(runtime_config)
-    default_leverage = min(DEFAULT_LEVERAGE, ceiling)
-    floor_leverage = min(MIN_LEVERAGE, ceiling)
-
-    price = _current_market_price(state)
-    min_notional, notional_step, notional_source = venue_order_floor(
-        state.get("symbol") or "",
-        price,
-        _MIN_ORDER_NOTIONAL_USDT,
-    )
-
-    # 下界按默认杠杆给：模型可以自己抬到 ceiling，那只会让下界更低。
-    min_size_hint = min_viable_size_hint(equity, default_leverage, min_notional)
-    floor_at_max_leverage = min_viable_size_hint(equity, ceiling, min_notional)
-
-    tradeable = (
-        floor_at_max_leverage is not None
-        and max_ratio > 0
-        and floor_at_max_leverage <= max_ratio
-    )
-    return {
-        "account_equity": equity,
-        "order_notional_formula": "account_equity * size_hint * leverage",
-        "margin_formula": "account_equity * size_hint",
-        "leverage_scales_exposure": True,
-        "default_leverage": int(default_leverage),
-        # 低于这个倍数的 leverage_hint 会被抬上来，所以直接告诉模型区间，
-        # 免得它给出一个会被悄悄改掉的值。
-        "min_leverage": int(floor_leverage),
-        "max_leverage": int(ceiling),
-        "min_order_notional_usdt": round(min_notional, 4),
-        # 这个下限是这个标的自己的，不是全局值——各标的能差四倍以上。
-        "min_order_notional_symbol": state.get("symbol") or None,
-        "min_order_notional_source": notional_source,
-        # 成交数量按步进向下截断，所以下单额落在步进整数倍上才不浪费保证金。
-        "notional_step_usdt": round(notional_step, 4) if notional_step > 0 else None,
-        # 低于这个比例的 size_hint 会被抬上来，理由同 min_leverage：
-        # 与其让模型给一个会被悄悄改掉的值，不如直接把区间告诉它。
-        "min_size_hint": position_ratio_floor(runtime_config, max_ratio),
-        "min_viable_size_hint": min_size_hint,
-        "min_viable_size_hint_at_max_leverage": floor_at_max_leverage,
-        "max_size_hint": max_ratio or None,
-        "any_size_tradeable": bool(tradeable),
-    }
-
-
 def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str:
     runtime_config = state.get("runtime_config") or {}
     if not isinstance(runtime_config, dict):
@@ -992,64 +914,13 @@ def _build_supervisor_prompt(state: DecisionState, ai_model_config: dict) -> str
     # 检查长期记忆是否为空，添加警告提示
     long_term_memory = state.get("long_term_memory") or {}
     long_term_items = long_term_memory.get("items") or []
-    memory_warning = ""
-    if not long_term_items:
-        memory_warning = (
-            "\n\n⚠️ 警告：长期记忆为空，系统无法参考历史交易经验。\n"
-            "这可能导致：\n"
-            "1. 重复犯相同的错误（如识别假突破）\n"
-            "2. 无法根据历史表现调整风险偏好\n"
-            "3. 缺少决策连续性\n\n"
-            "建议：请更加谨慎，降低confidence和size_hint，避免在不确定的市场条件下开仓。\n"
-            "如果这是新系统，请确保记忆整合任务正在运行。\n"
-        )
+    # 旧文案让模型"降低 confidence 和 size_hint"——复盘里每一笔坏入场都是
+    # 这个动作的产物。记忆为空该换来更严的确认要求，不是更小的仓位。
+    memory_warning = "" if long_term_items else SUPERVISOR_EMPTY_MEMORY_NOTE
 
     return (
-        "You are the trading supervisor. "
-        "Return JSON only with keys action, side, confidence, size_hint, leverage_hint, holding_window, invalidation, summary_reason. "
-        "Allowed action values only: OPEN_LONG, OPEN_SHORT, ADD_LONG, ADD_SHORT, REDUCE, CLOSE, HOLD, SKIP. "
-        "Do not return open, open_position, buy, sell, long, short, wait, none, or no_action. "
-        "If current position is flat and there is no confirmed entry, use SKIP. "
-        "If current position is flat and entry is confirmed, use OPEN_LONG or OPEN_SHORT. "
-        "If a position exists and you want no change, use HOLD. "
-        "For HOLD or SKIP, set invalidation to no_trade_condition. "
-        "If current_position_opened_at is present, opening a new position requires strong confirmation. "
-        "Use current_time and current_position_holding_minutes together with current_position_opened_at to judge holding duration. "
-        "After a position is opened, avoid frequent ADD_LONG, ADD_SHORT, REDUCE, or CLOSE. "
-        "If the current position was opened recently and no invalidation or risk event is present, prefer HOLD. "
-        "Use agent_messages_json, deliberation_summary, and deliberation_referee_review_json as decision context. "
-        "The referee review is advisory only; you must make the final decision. "
-        "Use side in {long, short, flat}. "
-        "confidence must be an integer from 0 to 100. "
-        "holding_window must be a concrete duration like 15m-4h; never return N/A, none, null, 0, or empty. "
-        "invalidation must never be N/A, none, null, or empty. "
-        "For volume-price and Wyckoff judgment, prioritize kline_context.period_summaries with source=kline_ohlcv, "
-        "quote_volume_sum, quote_volume_ratio, and volume_price_signals; do not treat ticker 24h cumulative volume as bar volume confirmation. "
-        "size_hint must be a plain numeric account-equity ratio from 0 to 1, such as 0.08; "
-        "do not include BTC, USDT, percent signs, units, ranges, or explanatory text in size_hint. "
-        "leverage_hint must be a plain integer, such as 8; "
-        "do not include x, ranges, or explanatory text in leverage_hint. "
-        "Read sizing_constraints before choosing size_hint and leverage_hint. "
-        "size_hint is the fraction of account equity committed as margin; exposure is "
-        "account_equity * size_hint * leverage_hint, so leverage does increase position "
-        "size. size_hint must be either 0 (with SKIP or HOLD) or between min_size_hint "
-        "and max_size_hint, which cap margin, not exposure. Values below min_size_hint are "
-        "raised to it, so pick within the range rather than under it. Exposure must also clear the exchange minimum "
-        "notional: at default_leverage that means size_hint of at least "
-        "min_viable_size_hint, and raising leverage_hint lowers that floor down to "
-        "min_viable_size_hint_at_max_leverage. An order below the minimum notional is "
-        "rejected outright, so it is strictly worse than SKIP. min_order_notional_usdt is "
-        "this symbol's own floor, not a shared one — symbols differ by more than 4x, so "
-        "never carry a size over from another symbol. Fills truncate down to a whole "
-        "multiple of notional_step_usdt, so exposure landing just under a step is paid "
-        "for in margin but never opened; aim at a multiple. leverage_hint must be an "
-        "integer between min_leverage and max_leverage; omit it to use default_leverage. "
-        "Values below min_leverage are raised to it, so pick within the range rather "
-        "than under it. Choose leverage for the setup, not to satisfy the minimum "
-        "notional — if the only way to clear the floor is leverage you would not "
-        "otherwise take, return SKIP. "
-        "If any_size_tradeable is false, no position is possible at this equity even at "
-        "max_leverage: return SKIP.\n"
+        f"{SUPERVISOR_METHODOLOGY}\n\n"
+        f"{SUPERVISOR_OUTPUT_CONTRACT}\n\n"
         f"《上次决策记录》\n{previous_supervisor_decisions_json}\n"
         f"Long-term experience memory\n{json.dumps(prompt_long_term_memory, ensure_ascii=False, default=str)}\n"
         f"Memory usage\n{json.dumps(prompt_memory_usage, ensure_ascii=False, default=str)}\n"

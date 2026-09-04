@@ -552,7 +552,7 @@ def _build_market_context(state: dict[str, Any]) -> dict[str, Any]:
         "ema_trend": feature_snapshot.get("ema_trend") or {},
         "period_summaries": feature_snapshot.get("kline_period_summaries") or [],
         "volume_price_signals": feature_snapshot.get("kline_volume_price_signals") or [],
-        "wyckoff_shortterm": feature_snapshot.get("wyckoff_shortterm") or {},
+        "wyckoff_shortterm": _strip_wyckoff_config(feature_snapshot.get("wyckoff_shortterm") or {}),
     }
     latest_kline_context = None
     for item in reversed(market_history):
@@ -574,7 +574,7 @@ def _build_market_context(state: dict[str, Any]) -> dict[str, Any]:
         period_summaries = kline_period_summaries
     if isinstance(kline_period_summaries, list) and kline_period_summaries and isinstance(kline_volume_price_signals, list):
         volume_price_signals = kline_volume_price_signals
-    wyckoff_shortterm = (
+    wyckoff_shortterm = _strip_wyckoff_config(
         kline_context.get("wyckoff_shortterm")
         if isinstance(kline_context, dict) and isinstance(kline_context.get("wyckoff_shortterm"), dict)
         else feature_snapshot.get("wyckoff_shortterm") or {}
@@ -942,7 +942,51 @@ _PROMPT_INTERNAL_STRATEGY_KEYS = {
     "prompt_bindings",
     "agent_profiles",
     "resolved_agent_configs",
+    # 采集端的接入配置：模型判断行情用的是 market_context 里的实际数据，
+    # 不是这些数据从哪个 URL 取的。下游没有任何一处读它们。
+    "news_api_config",
+    "onchain_api_config",
+    "social_api_config",
+    "market_data_config",
 }
+
+#: market_api_config 里纯属传输层调参的键。行情接入的地址与限频对交易判断
+#: 没有信息量，WebSocket 的 ping 间隔更没有。
+_PROMPT_MARKET_API_NOISE_KEYS = (
+    "ws_base_url",
+    "ws_path",
+    "ws_stream_name_template",
+    "ws_combined_enabled",
+    "ws_symbol_lowercase",
+    "ws_ping_interval_seconds",
+    "ws_pong_timeout_seconds",
+    "ws_connection_ttl_hours",
+    "ws_max_streams_per_connection",
+    "ws_control_messages_per_second",
+    "doc_reference_url",
+)
+
+
+def _sanitize_prompt_market_api_config(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    sanitized = {
+        key: item
+        for key, item in value.items()
+        if key not in _PROMPT_MARKET_API_NOISE_KEYS and not str(key).startswith("ws_")
+    }
+    return sanitized
+
+
+#: Wyckoff 检测器的内部阈值。约 570 字符，每次决策完全一样，而且它描述的是
+#: 判定怎么算出来的，不是判定本身——模型该读的是 trade_readiness 与
+#: no_trade_reason，不是去反推阈值再自行重算一遍。
+def _strip_wyckoff_config(block: Any) -> Any:
+    if not isinstance(block, dict):
+        return block
+    if "config" not in block:
+        return block
+    return {key: value for key, value in block.items() if key != "config"}
 
 
 def _sanitize_prompt_position_guard(value: Any) -> Any:
@@ -969,6 +1013,10 @@ def build_prompt_strategy_context(state: dict[str, Any]) -> dict[str, Any]:
         payload["position_guard"] = _sanitize_prompt_position_guard(payload.get("position_guard"))
     if "positionGuard" in payload:
         payload["positionGuard"] = _sanitize_prompt_position_guard(payload.get("positionGuard"))
+    if "market_api_config" in payload:
+        payload["market_api_config"] = _sanitize_prompt_market_api_config(payload.get("market_api_config"))
+    if "marketApiConfig" in payload:
+        payload["marketApiConfig"] = _sanitize_prompt_market_api_config(payload.get("marketApiConfig"))
     return payload
 
 
@@ -1048,6 +1096,10 @@ def _empty_recent_context(domain: str) -> dict[str, Any]:
     return {"event_count": 0, "events": [], "summary": f"not_{domain}_agent_scope"}
 
 def build_supervisor_render_context(state: dict[str, Any]) -> dict[str, Any]:
+    # 延迟导入：decision 包不依赖 prompting，反向也只在这一处，放在函数里
+    # 是为了让模块级导入图保持单向，读代码的人不必去验证有没有环。
+    from trade_runtime.decision.sizing import sizing_constraints
+
     runtime_config = state.get("runtime_config") or {}
     if not isinstance(runtime_config, dict):
         runtime_config = {}
@@ -1095,6 +1147,9 @@ def build_supervisor_render_context(state: dict[str, Any]) -> dict[str, Any]:
         "onchain_view_json": _json_dumps(state.get("onchain_view") or {}),
         "social_view_json": _json_dumps(state.get("social_view") or {}),
         "runtime_risk_limits_json": _json_dumps(risk_limits),
+        # 这一段只在内联提示词里有过。模板路径缺了它，模型就看不到"这个标的
+        # 此刻最小能下多少、上限是多少"，给出的 size_hint 会被交易所直接拒掉。
+        "sizing_constraints_json": _json_dumps(sizing_constraints(state, runtime_config)),
         "market_source_status": str(state.get("market_source_status") or "").strip(),
         "market_source_context_json": _json_dumps(state.get("market_source_context") or {}),
         "market_context_json": _json_dumps(_build_market_context(state)),

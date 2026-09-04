@@ -17,6 +17,7 @@ maxLeverage 形同虚设。合约本来就该用少量保证金撬动敞口，�
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 
@@ -203,3 +204,120 @@ def venue_order_floor(
     if floor <= 0:
         return fallback, 0.0, "fallback:no_constraint"
     return floor, max(step, 0.0), "venue"
+
+# ---------------------------------------------------------------------------
+# 可下仓位区间：写给模型看的那一段
+# ---------------------------------------------------------------------------
+
+#: 交易所对单笔委托的最小名义价值。币安 U 本位合约多数交易对是 5 USDT，
+#: 个别是 20。给不出准确值时宁可取大：报小了会让模型开出必然被拒的单子。
+MIN_ORDER_NOTIONAL_USDT = float(
+    os.getenv("TRADE_RUNTIME_MIN_ORDER_NOTIONAL_USDT", "5") or 5
+)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def current_market_price(state: Any) -> float:
+    """从决策状态里取当前价。
+
+    价格决定按标的算出来的最小下单额（步进是按币量定的），所以它是
+    sizing_constraints 的输入而不是装饰。取不到价时 venue_order_floor 会
+    退回兜底值并标注来源。
+    """
+    if not isinstance(state, dict):
+        return 0.0
+    feature_snapshot = state.get("feature_snapshot") or {}
+    if isinstance(feature_snapshot, dict):
+        position_context = feature_snapshot.get("position_risk_context") or {}
+        if isinstance(position_context, dict):
+            price = _safe_float(position_context.get("current_price"), 0.0)
+            if price > 0:
+                return price
+        for key in ("effective_price", "latest_price", "price"):
+            price = _safe_float(feature_snapshot.get(key), 0.0)
+            if price > 0:
+                return price
+    events = state.get("event_bundle")
+    if isinstance(events, list):
+        for event in reversed(events):
+            if not isinstance(event, dict):
+                continue
+            price = _safe_float(event.get("effective_price") or event.get("price"), 0.0)
+            if price > 0:
+                return price
+    return 0.0
+
+
+def sizing_constraints(state: Any, runtime_config: Any) -> dict[str, Any]:
+    """算出这一刻、这个标的真正可下的仓位区间。
+
+    口径与本模块其余部分完全一致（同一份实现），否则模型会按一个区间给值、
+    风控和下单却按另一个算，出现"照着提示给的数反而被拒"。
+
+    杠杆在这里是有用的：size_hint 是动用多少权益作为保证金，敞口是它乘
+    杠杆，所以杠杆越高、能满足交易所最小下单额的 size_hint 下界越低。
+
+    最小下单额必须按标的取。此前用的是一个全局常量 5 USDT，而实测 ETH 的
+    真实下限是 21.6——模型照着 5 给 ETH 定了 10 和 15 USDT 两单，建好、发出、
+    被交易所过滤器静默拒掉，两次有效信号就这么没了。
+
+    内联提示词与模板渲染上下文都调这一个函数。模板路径此前没有这一段，
+    切过去就会整段丢失。
+    """
+    if not isinstance(runtime_config, dict):
+        runtime_config = {}
+    equity = _safe_float((state or {}).get("account_equity") if isinstance(state, dict) else None, 0.0)
+    max_ratio = _safe_float(runtime_config.get("max_position_ratio"), 0.0)
+    ceiling = leverage_ceiling(runtime_config)
+    default_leverage = min(DEFAULT_LEVERAGE, ceiling)
+    floor_leverage = min(MIN_LEVERAGE, ceiling)
+
+    symbol = (state or {}).get("symbol") if isinstance(state, dict) else None
+    price = current_market_price(state)
+    min_notional, notional_step, notional_source = venue_order_floor(
+        symbol or "",
+        price,
+        MIN_ORDER_NOTIONAL_USDT,
+    )
+
+    # 下界按默认杠杆给：模型可以自己抬到 ceiling，那只会让下界更低。
+    min_hint = min_viable_size_hint(equity, default_leverage, min_notional)
+    floor_at_max_leverage = min_viable_size_hint(equity, ceiling, min_notional)
+
+    tradeable = (
+        floor_at_max_leverage is not None
+        and max_ratio > 0
+        and floor_at_max_leverage <= max_ratio
+    )
+    return {
+        "account_equity": equity,
+        "order_notional_formula": "account_equity * size_hint * leverage",
+        "margin_formula": "account_equity * size_hint",
+        "leverage_scales_exposure": True,
+        "default_leverage": int(default_leverage),
+        # 低于这个倍数的 leverage_hint 会被抬上来，所以直接告诉模型区间，
+        # 免得它给出一个会被悄悄改掉的值。
+        "min_leverage": int(floor_leverage),
+        "max_leverage": int(ceiling),
+        "min_order_notional_usdt": round(min_notional, 4),
+        # 这个下限是这个标的自己的，不是全局值——各标的能差四倍以上。
+        "min_order_notional_symbol": symbol or None,
+        "min_order_notional_source": notional_source,
+        # 成交数量按步进向下截断，所以下单额落在步进整数倍上才不浪费保证金。
+        "notional_step_usdt": round(notional_step, 4) if notional_step > 0 else None,
+        # 低于这个比例的 size_hint 会被抬上来，理由同 min_leverage：
+        # 与其让模型给一个会被悄悄改掉的值，不如直接把区间告诉它。
+        "min_size_hint": position_ratio_floor(runtime_config, max_ratio),
+        "min_viable_size_hint": min_hint,
+        "min_viable_size_hint_at_max_leverage": floor_at_max_leverage,
+        "max_size_hint": max_ratio or None,
+        "any_size_tradeable": bool(tradeable),
+    }
