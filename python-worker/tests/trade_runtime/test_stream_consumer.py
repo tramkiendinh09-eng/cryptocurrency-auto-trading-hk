@@ -266,3 +266,116 @@ def test_stream_consumer_rehydrates_active_signal_metadata_from_stream_entry():
 
     assert result["processed"] == 1
     assert handled[0].payload["active_signal_ref"] == "news:BTCUSDT:15m"
+
+
+class _NoGroupError(Exception):
+    """模拟 redis.exceptions.ResponseError 的 NOGROUP。"""
+
+
+class _GroupVanishesRedis:
+    """消费组在 __init__ 之后消失：第一次 xreadgroup 抛 NOGROUP，重建后才成功。
+
+    线上真实故障：Redis 的 maxmemory-policy 是 allkeys-lru，会驱逐**任何** key，
+    包括没有 TTL 的 trade.runtime.events 这条流；流被整个驱逐时消费组一起消失，
+    之后 XADD 只重建流、不重建组。ensure_group() 只在 __init__ 跑一次，于是
+    consume_once() 永远抛 NOGROUP，而这个消费者的 handler 正是把事件 POST 到
+    后端——一挂就是 57 分钟 event_raw / market_metric_snapshot 完全没有写入，
+    决策链路却照常跑，除了日志之外毫无征兆。
+    """
+
+    def __init__(self, message=None):
+        self.group_creates = []
+        self.reads = 0
+        self.acks = []
+        self._message = message
+
+    def xgroup_create(self, stream_name, group_name, id="$", mkstream=True):
+        self.group_creates.append((stream_name, group_name, id, mkstream))
+
+    def xlen(self, stream_name):
+        return 9483
+
+    def xreadgroup(self, group_name, consumer_name, streams, count=1, block=0):
+        self.reads += 1
+        if self.reads == 1:
+            raise _NoGroupError(
+                "NOGROUP No such key 'trade.runtime.events' or consumer group "
+                "'trade-runtime.persist' in XREADGROUP with GROUP option"
+            )
+        return [("trade.runtime.events", [self._message])] if self._message else []
+
+    def set(self, *args, **kwargs):
+        return True
+
+    def delete(self, *args, **kwargs):
+        return True
+
+    def hincrby(self, *args, **kwargs):
+        return 1
+
+    def hdel(self, *args, **kwargs):
+        return 1
+
+    def xack(self, stream_name, group_name, message_id):
+        self.acks.append(message_id)
+
+    def xadd(self, *args, **kwargs):
+        return "0-0"
+
+
+def _consumer(redis_client, handler=lambda event: None):
+    return StreamConsumer(
+        redis_client=redis_client,
+        stream_name="trade.runtime.events",
+        group_name="trade-runtime.persist",
+        consumer_name="worker-1",
+        handler=handler,
+    )
+
+
+def test_missing_consumer_group_is_recreated_and_read_retried():
+    redis_client = _GroupVanishesRedis()
+    consumer = _consumer(redis_client)
+
+    # 不该抛：NOGROUP 是可恢复的。
+    consumer.consume_once(count=5)
+
+    # __init__ 一次 + 恢复时一次
+    assert len(redis_client.group_creates) == 2, redis_client.group_creates
+    assert redis_client.reads == 2, "重建消费组之后必须重试本次读取"
+
+
+def test_recovery_recreates_at_dollar_not_zero():
+    """重建仍用 id="$"。
+
+    去重键同样可能已被驱逐，从 0 重放会把同一批行情事件二次写进 event_raw，
+    而下游聚合窗口会重复累加——宁可丢一段也不要污染。
+    """
+    redis_client = _GroupVanishesRedis()
+    _consumer(redis_client).consume_once(count=1)
+
+    assert [c[2] for c in redis_client.group_creates] == ["$", "$"]
+
+
+def test_non_nogroup_errors_still_propagate():
+    """只有 NOGROUP 才自愈，别的错误不能被吞掉。"""
+
+    class _BrokenRedis(_GroupVanishesRedis):
+        def xreadgroup(self, *args, **kwargs):
+            raise _NoGroupError("WRONGTYPE Operation against a key holding the wrong kind of value")
+
+    consumer = _consumer(_BrokenRedis())
+    try:
+        consumer.consume_once(count=1)
+    except _NoGroupError:
+        pass
+    else:
+        raise AssertionError("非 NOGROUP 的错误必须继续上抛")
+
+
+def test_recovery_logs_skipped_backlog(caplog):
+    """跳过的积压条数必须留在日志里，否则这段丢失无从察觉、也无从补。"""
+    redis_client = _GroupVanishesRedis()
+    with caplog.at_level("ERROR"):
+        _consumer(redis_client).consume_once(count=1)
+    assert "9483" in caplog.text, "必须记下跳过的积压条数"

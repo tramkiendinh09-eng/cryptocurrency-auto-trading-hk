@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from trade_runtime.streams import RuntimeStreamEvent
+
+logger = logging.getLogger(__name__)
 
 
 class StreamConsumer:
@@ -37,6 +40,55 @@ class StreamConsumer:
             if "BUSYGROUP" not in str(exc):
                 raise
 
+    def _recover_missing_group(self) -> bool:
+        """消费组事后消失时重建它，返回是否值得重试本次读取。
+
+        ensure_group() 原本只在 __init__ 调用一次。消费组一旦事后消失，
+        consume_once() 就会永远抛 NOGROUP，对象自己不会恢复——只有重启进程
+        才可能修好。2026-09-04 实际发生过：Redis 的 maxmemory-policy 是
+        allkeys-lru，会驱逐**任何** key，包括没有 TTL 的这条流；流被整个驱逐时
+        消费组一起消失，之后 XADD 只重建流、不重建组。因为本消费者的 handler
+        就是把事件 POST 到后端，这一挂就是 57 分钟 event_raw 与
+        market_metric_snapshot 完全没有写入，而决策链路照常跑、日志之外毫无
+        征兆。根因已另行修掉（redis.conf 改成 volatile-lru），这里是第二道防线。
+
+        重建仍用 id="$"，与 ensure_group 一致：只收新消息。不改成 id=0 是因为
+        去重键同样可能已被驱逐，重放会把同一批行情事件二次写进 event_raw，
+        而下游的聚合窗口会把它们重复累加——宁可丢一段也不要污染。所以这里把
+        当前积压条数打进日志，需要补数据时可人工从 id=0 重建。
+        """
+        try:
+            backlog = self.redis_client.xlen(self.stream_name)
+        except Exception:
+            backlog = -1
+        try:
+            self.ensure_group()
+        except Exception:
+            logger.exception(
+                "stream consumer group recreate failed stream=%s group=%s",
+                self.stream_name,
+                self.group_name,
+            )
+            return False
+        logger.error(
+            "stream consumer group was missing and has been recreated at $; "
+            "stream=%s group=%s skipped_backlog=%s "
+            "(要补这段数据需人工 XGROUP CREATE ... 0 重建)",
+            self.stream_name,
+            self.group_name,
+            backlog,
+        )
+        return True
+
+    def _read_group(self, *, count: int, block_ms: int) -> list:
+        return self.redis_client.xreadgroup(
+            self.group_name,
+            self.consumer_name,
+            {self.stream_name: ">"},
+            count=max(1, int(count or 1)),
+            block=max(0, int(block_ms or 0)),
+        ) or []
+
     def consume_available(self, *, max_messages: int, block_ms: int = 0) -> dict[str, int]:
         if max_messages <= 0:
             return {"read": 0, "processed": 0, "acked": 0, "duplicates": 0, "dead_lettered": 0, "retried": 0}
@@ -44,13 +96,13 @@ class StreamConsumer:
 
     def consume_once(self, *, count: int = 1, block_ms: int = 0) -> dict[str, int]:
         result = {"read": 0, "processed": 0, "acked": 0, "duplicates": 0, "dead_lettered": 0, "retried": 0}
-        messages = self.redis_client.xreadgroup(
-            self.group_name,
-            self.consumer_name,
-            {self.stream_name: ">"},
-            count=max(1, int(count or 1)),
-            block=max(0, int(block_ms or 0)),
-        ) or []
+        try:
+            messages = self._read_group(count=count, block_ms=block_ms)
+        except Exception as exc:
+            # NOGROUP 只在消费组不存在时出现，是可恢复的；其它错误照常上抛。
+            if "NOGROUP" not in str(exc) or not self._recover_missing_group():
+                raise
+            messages = self._read_group(count=count, block_ms=block_ms)
         for stream_name, stream_messages in messages:
             for message_id, entry in stream_messages:
                 result["read"] += 1
