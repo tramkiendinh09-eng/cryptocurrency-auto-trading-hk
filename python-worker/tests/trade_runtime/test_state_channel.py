@@ -130,3 +130,41 @@ def test_unknown_readiness_still_dispatches():
 
     assert _wyckoff_dispatch_mode({"trade_readiness": "confirmed"}, {}) == "LLM_ALLOWED"
     assert _wyckoff_dispatch_mode({}, {}) == "LLM_ALLOWED"
+
+
+# ----------------------------------------------------------------------
+# 配置解析必须同时接受 RuntimeConfig 对象和 model_dump() 的字典
+# ----------------------------------------------------------------------
+
+
+def test_wyckoff_config_survives_a_pydantic_runtime_config():
+    """调用方不一致：runtime_runner 传字典，bootstrap 那几条路径传对象。
+
+    只认字典的话对象那条路会静默退回默认值，两边都不报错。线上后果：库里
+    写着 macroPositionEnabled=false，实际跑的是代码默认的 true，行情处在
+    24h 高位时每一笔做多都被宏观位置过滤否决，连续数小时零开仓。
+
+    同一个坑在 _market_data_enhancement_config 上踩过一次，
+    _wyckoff_shortterm_config 是同文件的兄弟函数，当时漏了。
+    """
+    from trade_runtime.config import RuntimeConfig
+    from trade_runtime.runtime_inputs import _wyckoff_shortterm_config
+
+    flags = '{"wyckoffShortterm": {"macroPositionEnabled": false, "min15mBars": 11}}'
+    config = RuntimeConfig.model_validate({"defaultMode": "paper", "runtimeFlagsJson": flags})
+
+    from_object = _wyckoff_shortterm_config(config, {})
+    from_dict = _wyckoff_shortterm_config(config.model_dump(), {})
+
+    assert from_object.get("macroPositionEnabled") is False
+    assert from_object.get("min15mBars") == 11
+    # 两条路径必须给出一样的结果，否则配置只在一半的场景生效
+    assert from_object == from_dict
+
+
+def test_wyckoff_config_handles_none_and_garbage():
+    from trade_runtime.runtime_inputs import _wyckoff_shortterm_config
+
+    assert _wyckoff_shortterm_config(None, {}) == {}
+    assert _wyckoff_shortterm_config("not-a-config", {}) == {}
+    assert _wyckoff_shortterm_config(123, {}) == {}

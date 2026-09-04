@@ -100,12 +100,39 @@ def _market_data_enhancement_config(runtime_config: Any | None) -> dict[str, Any
     return config
 
 
+def _normalize_runtime_config_payload(runtime_config: Any | None) -> dict[str, Any]:
+    """把 RuntimeConfig 对象和 model_dump() 出来的字典统一成字典。
+
+    调用方不一致：runtime_runner 传 model_dump() 的字典，bootstrap 那几条路径
+    直接传 RuntimeConfig 对象。只认字典的话，对象那条路会静默退回默认值——
+    配置在一条路径生效、另一条不生效，两边都不报错。
+
+    这个坑在 _market_data_enhancement_config 上踩过一次并修好了，
+    _wyckoff_shortterm_config 是同一个文件里的兄弟函数，当时漏了。
+    后果是 wyckoffShortterm 的配置对线上完全无效：库里写着
+    macroPositionEnabled=false，实际跑的是代码默认的 true，于是行情处在
+    24h 高位时每一笔做多都被宏观位置过滤否决，连续数小时零开仓。
+    """
+    if runtime_config is None:
+        return {}
+    if isinstance(runtime_config, dict):
+        return runtime_config
+    model_dump = getattr(runtime_config, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump()
+        except Exception:
+            return {}
+        return dumped if isinstance(dumped, dict) else {}
+    return {}
+
+
 def _wyckoff_shortterm_config(
-    runtime_config: dict[str, Any] | None,
+    runtime_config: Any | None,
     strategy_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     config: dict[str, Any] = {}
-    runtime_payload = runtime_config if isinstance(runtime_config, dict) else {}
+    runtime_payload = _normalize_runtime_config_payload(runtime_config)
     runtime_flags = _parse_object_json(runtime_payload.get("runtime_flags") or runtime_payload.get("runtimeFlags"))
     runtime_flags_json = _parse_object_json(
         runtime_payload.get("runtimeFlagsJson") or runtime_payload.get("runtime_flags_json")
