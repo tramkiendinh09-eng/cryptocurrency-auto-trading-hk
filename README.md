@@ -376,12 +376,3 @@ npm run test:unit
 本项目基于 MIT 协议开源，详见 [`LICENSE`](LICENSE)。
 
 本项目基于若依（RuoYi-Vue）框架开发，感谢若依团队提供的优秀开源框架。
-
-## 联系作者
-
-如有问题、建议或合作意向，欢迎通过以下方式联系：
-
-<img src="docs/images/联系作者.jpg" width="240" alt="联系作者"/>
-
-- 微信：**colin**（扫码或搜索添加，备注「cryptocurrency-auto-trading」）
-- 所在地：丹麦
