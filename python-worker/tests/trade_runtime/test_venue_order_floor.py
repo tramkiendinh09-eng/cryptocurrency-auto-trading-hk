@@ -113,9 +113,9 @@ class TestSizingConstraintsUseTheSymbolsOwnFloor:
         sol = self._constraints("SOLUSDT", 100.0)
         assert eth["min_order_notional_usdt"] == pytest.approx(21.6)
         assert sol["min_order_notional_usdt"] == pytest.approx(5.0)
-        # 6 倍杠杆、100 USDT 权益：21.6/(100*6)=0.036，5/(100*6)=0.0083
-        assert eth["min_viable_size_hint"] == pytest.approx(0.036)
-        assert sol["min_viable_size_hint"] == pytest.approx(0.009)
+        # 10 倍杠杆、100 USDT 权益：21.6/(100*10)=0.0216，5/(100*10)=0.005
+        assert eth["min_viable_size_hint"] == pytest.approx(0.022)
+        assert sol["min_viable_size_hint"] == pytest.approx(0.005)
 
     def test_the_old_global_constant_would_have_understated_eth_by_4x(self, venue):
         """回归守卫：这正是上线时丢掉两笔 ETH 信号的那个数。

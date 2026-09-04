@@ -93,7 +93,7 @@ def _runtime_policy_defaults() -> dict[str, Any]:
         # 杠杆的默认倍数。上界的硬夹持在 decision/sizing.py，那里不允许
         # 超过 12——把上限写死在代码里，是为了让"配置多打一个零"不至于
         # 变成 100 倍杠杆。
-        "maxLeverage": 6.0,
+        "maxLeverage": 10.0,
         # 开仓时 size_hint 的下界，口径见 decision/sizing.py。
         "minPositionRatio": 0.05,
         "triggerMode": "EVENT_GATED",
@@ -308,7 +308,7 @@ class RuntimeConfig(BaseModel):
     # 只存在于 runtimeFlagsJson 里，需要显式声明才不会在 model_dump 时被丢掉。
     # 缺省与 decision/sizing.py 的 DEFAULT_LEVERAGE 一致：读不到配置时
     # 往保守一侧倒，杠杆太小只是一单被拒，太大是爆仓。
-    max_leverage: float = Field(default=6.0, alias="maxLeverage")
+    max_leverage: float = Field(default=10.0, alias="maxLeverage")
     # 同样只存在于 runtimeFlagsJson 里。不显式声明，model_dump 就会把它丢掉，
     # 而 supervisor 拿到的正是 model_dump 的结果——下界会静默地退回代码默认值。
     min_position_ratio: float = Field(default=0.05, alias="minPositionRatio")
@@ -371,15 +371,15 @@ class RuntimeConfig(BaseModel):
     @field_validator("max_leverage", mode="before")
     @classmethod
     def normalize_max_leverage(cls, value):
-        """配置缺失或非法时退回 6 倍（同 decision/sizing.py 的 DEFAULT_LEVERAGE）。
+        """配置缺失或非法时退回 10 倍（同 decision/sizing.py 的 DEFAULT_LEVERAGE）。
         上界的硬夹持在 decision/sizing.py，这里只保证类型与下界。"""
         if value in (None, ""):
-            return 6.0
+            return 10.0
         try:
             resolved = float(value)
         except (TypeError, ValueError):
-            return 6.0
-        return resolved if resolved > 0 else 6.0
+            return 10.0
+        return resolved if resolved > 0 else 10.0
 
     @field_validator("min_position_ratio", mode="before")
     @classmethod

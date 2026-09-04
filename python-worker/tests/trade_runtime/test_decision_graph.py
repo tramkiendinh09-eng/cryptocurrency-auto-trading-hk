@@ -911,9 +911,9 @@ def test_execution_node_emits_paper_trade_order_callback_in_paper_mode():
 
     assert state["execution_result"]["status"] == "filled"
     assert callback_client.paper_trade_order_payloads[0]["traceId"] == "t-paper-1"
-    # 敞口 = 权益 × size_hint × 杠杆。模型没给 leverage_hint，用默认 6 倍，
+    # 敞口 = 权益 × size_hint × 杠杆。模型没给 leverage_hint，用默认 10 倍，
     # 所以是不带杠杆时 3500 的六倍——杠杆真正参与仓位计算。
-    assert callback_client.paper_trade_order_payloads[0]["quoteAmount"] == 21000.0
+    assert callback_client.paper_trade_order_payloads[0]["quoteAmount"] == 35000.0
     assert callback_client.paper_trade_order_payloads[0]["orderRef"] == "paper-BTCUSDT"
     assert callback_client.paper_trade_order_payloads[0]["executionStatus"] == "filled"
     assert callback_client.paper_trade_order_payloads[0]["orderStatus"] == "FILLED"
@@ -1259,13 +1259,13 @@ def test_execution_node_passes_limit_order_metadata_without_changing_callbacks()
                 "action": "OPEN_LONG",
                 "side": "long",
                 "size_hint": 0.1,
-                "leverage_hint": 7,
+                "leverage_hint": 11,
                 "order_type": "limit",
                 "limit_price": 64950.0,
             },
             # 没有 maxLeverage 时天花板退回默认 5 倍，7 会被夹到 5——
             # 那测的就是夹持而不是元数据流转了。
-            "runtime_config": {"maxLeverage": 10},
+            "runtime_config": {"maxLeverage": 12},
             "risk_result": {"passed": True, "reason": "pass"},
             "execution_router": StubExecutionRouter(),
         }
@@ -1277,7 +1277,7 @@ def test_execution_node_passes_limit_order_metadata_without_changing_callbacks()
     assert captured["order"]["reduce_only"] is False
     assert captured["order"]["order_type"] == "limit"
     assert captured["order"]["limit_price"] == 64950.0
-    assert captured["order"]["leverage"] == 7
+    assert captured["order"]["leverage"] == 11
     assert captured["order"]["td_mode"] == "cross"
     assert state["execution_result"]["status"] == "pending"
 
@@ -1319,11 +1319,11 @@ def test_execution_node_posts_order_audit_metadata_callbacks():
                 "action": "CLOSE",
                 "side": "long",
                 "size_hint": 1.0,
-                "leverage_hint": 6,
+                "leverage_hint": 11,
                 "order_type": "limit",
                 "limit_price": 65000.1,
             },
-            "runtime_config": {"maxLeverage": 10},
+            "runtime_config": {"maxLeverage": 12},
             "current_position_side": "long",
             "current_position_notional": 3250.0,
             "risk_result": {"passed": True, "reason": "pass"},
@@ -1338,7 +1338,7 @@ def test_execution_node_posts_order_audit_metadata_callbacks():
         assert payload["positionSide"] == "long"
         assert payload["reduceOnly"] is True
         assert payload["tdMode"] == "cross"
-        assert payload["leverage"] == 6
+        assert payload["leverage"] == 11
         assert payload["limitPrice"] == 65000.1
         assert payload["quantityBase"] == 0.05
         assert payload["okxEnhancedExecution"] is True
@@ -1465,8 +1465,8 @@ def test_graph_executes_paper_order_after_risk_passes():
     assert result["execution_result"]["status"] == "filled"
     assert result["execution_result"]["order_id"] == "paper-BTCUSDT"
     assert callback_client.order_payloads[0]["traceId"] == "t-4"
-    # 同上：默认 6 倍杠杆下敞口是保证金的六倍。
-    assert callback_client.order_payloads[0]["quoteAmount"] == 21000.0
+    # 同上：默认 10 倍杠杆下敞口是保证金的十倍。
+    assert callback_client.order_payloads[0]["quoteAmount"] == 35000.0
     assert callback_client.exchange_order_payloads[0]["orderRef"] == "paper-BTCUSDT"
     assert callback_client.exchange_order_payloads[0]["status"] == "filled"
     assert callback_client.exchange_order_payloads[0]["executionStatus"] == "filled"
