@@ -33,10 +33,34 @@ _EVENT_KEYWORDS = (
 # 超过这个时长的条目仍然返回（作为给模型的背景），但分数封顶在触发线
 # 以下，不再充当触发器。
 _FRESH_WINDOW_HOURS = 8
+
+# 已经发过的条目同样封顶——一篇文章只该触发一次。
+#
+# RSS 里一条新闻会挂 max_age_hours（默认 24 小时），而适配器每 180 秒轮询
+# 一次，于是同一篇报道被当成新事件重复发出最多约 480 次。实测 NVDAUSDT
+# 近 6 小时 888 条新闻事件里只有 188 个不同标题，最重复的一条发了 31 次。
+# 后果不是"多几条噪声"：news 触发器按分数判定，同一条信息会把触发和 LLM
+# 预算反复消耗掉，而模型每次看到的是同一件事。
+#
+# 处理方式沿用过期条目那一套：不丢弃，仍然返回给模型当上下文，只是把分数
+# 压到触发线以下。丢弃会让"最近有哪些新闻"这个上下文凭空缺一块。
 # 封到基础分：worker 侧还有一道 ruleOnlyScoreThreshold（默认 0.7）会把
 # 0.7~0.8 之间的分数判成 RULE_ONLY，那同样是一次触发。取 0.65 让过期条目
 # 落在两道门槛之下，真正只作为上下文存在。
 _STALE_SCORE_CAP = 0.65
+
+
+def _item_identity(link: str, guid: str, title: str) -> str:
+    """一条新闻的稳定标识。
+
+    优先 guid（RSS 规范里就是干这个的），其次 link，最后退回标题。Google News
+    的 guid 与 link 都带跳转参数，但同一篇文章在多轮轮询里是稳定的，够用。
+    """
+    for candidate in (guid, link, title):
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return ""
 
 
 @dataclass
@@ -72,6 +96,9 @@ class RssNewsProvider:
         # 同一篇 RSS 在这个窗口内只抓一次，所有标的共用
         self.document_cache_seconds = max(int(document_cache_seconds or 0), 0)
         self._documents: dict[str, _Document] = {}
+        # (标的, 条目标识) -> 首次发出的时间。按 max_age_hours 过期清理，
+        # 免得进程跑久了无限增长。
+        self._emitted: dict[tuple[str, str], datetime] = {}
 
     def _fetch_document(self, url: str) -> str:
         """取一篇 RSS 原文，命中缓存则不走网络。"""
@@ -127,6 +154,7 @@ class RssNewsProvider:
         total_items = 0
         symbol_filtered = 0
         stale_filtered = 0
+        repeat_capped = 0
         latest_event_time = ""
         oldest_event_time = ""
         current_time_utc = self.current_time_supplier().astimezone(timezone.utc).replace(microsecond=0)
@@ -134,6 +162,8 @@ class RssNewsProvider:
             total_items += 1
             title = (item.findtext("title") or "").strip()
             summary = (item.findtext("description") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            guid = (item.findtext("guid") or "").strip()
             if not matches_symbol(symbol, title, summary):
                 symbol_filtered += 1
                 continue
@@ -146,24 +176,36 @@ class RssNewsProvider:
             if self._is_stale(event_time):
                 stale_filtered += 1
                 continue
+            identity = _item_identity(link, guid, title)
+            already_emitted = self._mark_emitted(symbol, identity, current_time_utc)
+            if already_emitted:
+                repeat_capped += 1
+            score = self._score_item(title, summary, event_time)
+            if already_emitted:
+                score = min(score, _STALE_SCORE_CAP)
             resolved.append(
                 {
                     "symbol": symbol,
                     "headline": title,
                     "summary": summary,
-                    "score": self._score_item(title, summary, event_time),
+                    # url 此前完全没进 payload，下游想按文章去重都无从下手
+                    # （实测 event_raw 里 url 的不同取值数是 0）。
+                    "url": link,
+                    "score": score,
                     "source": source_name,
                     "event_time": event_time,
+                    "repeat": already_emitted,
                 }
             )
         logger.info(
-            "feed_adapter_upstream_result provider=news symbol=%s url=%s source=%s total_items=%s symbol_filtered=%s stale_filtered=%s returned_items=%s max_age_hours=%s current_time_utc=%s latest_event_time=%s oldest_event_time=%s",
+            "feed_adapter_upstream_result provider=news symbol=%s url=%s source=%s total_items=%s symbol_filtered=%s stale_filtered=%s repeat_capped=%s returned_items=%s max_age_hours=%s current_time_utc=%s latest_event_time=%s oldest_event_time=%s",
             symbol or "-",
             url,
             source_name,
             total_items,
             symbol_filtered,
             stale_filtered,
+            repeat_capped,
             len(resolved),
             self.max_age_hours,
             current_time_utc.isoformat().replace("+00:00", "Z"),
@@ -171,6 +213,26 @@ class RssNewsProvider:
             oldest_event_time or "-",
         )
         return resolved
+
+    def _mark_emitted(self, symbol: str, identity: str, now: datetime) -> bool:
+        """记下这条已经发过，并回答"之前发过吗"。
+
+        标识为空时一律当作新条目——宁可重复发，也不要把所有无标识的条目
+        当成同一条给合并掉。
+        """
+        if not identity:
+            return False
+        key = (str(symbol or "").strip().upper(), identity)
+        ttl = timedelta(hours=self.max_age_hours or 24)
+        if self._emitted:
+            expired = [k for k, seen_at in self._emitted.items() if now - seen_at > ttl]
+            for k in expired:
+                self._emitted.pop(k, None)
+        previous = self._emitted.get(key)
+        if previous is not None:
+            return True
+        self._emitted[key] = now
+        return False
 
     def _to_iso8601(self, value: str | None) -> str:
         normalized = str(value or "").strip()

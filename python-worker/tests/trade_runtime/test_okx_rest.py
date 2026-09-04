@@ -49,9 +49,9 @@ def test_okx_rest_client_fetches_and_normalizes_public_market_data(monkeypatch):
         },
     }
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, timeout=None, proxies=None):
         path = url.replace("https://www.okx.com", "")
-        captured.append((path, params, timeout))
+        captured.append((path, params, timeout, proxies))
         return DummyResponse(payloads[path])
 
     monkeypatch.setattr("trade_runtime.ingestion.okx_rest.requests.get", fake_get)
@@ -82,4 +82,29 @@ def test_okx_rest_client_fetches_and_normalizes_public_market_data(monkeypatch):
     assert candles[0]["interval"] == "1m"
     assert candles[0]["close"] == 65050.0
     assert candles[0]["quote_volume"] == 650500.0
-    assert captured[0] == ("/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"}, 7)
+    # 没配代理时 proxies 必须是 None，否则 requests 会当成"用空代理"处理
+    assert captured[0] == ("/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"}, 7, None)
+
+
+def test_proxy_is_passed_through_when_configured(monkeypatch):
+    """本机直连 www.okx.com 与 aws.okx.com 均超时（实测 25s），OKX 的每一次
+    请求都必须经过代理；漏传就等于这个数据源整个不可用。"""
+    seen = {}
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"code": "0", "data": [{"last": "1", "vol24h": "1", "volCcy24h": "1"}]}
+
+    def fake_get(url, params=None, timeout=None, proxies=None):
+        seen["proxies"] = proxies
+        return _Resp()
+
+    monkeypatch.setattr("trade_runtime.ingestion.okx_rest.requests.get", fake_get)
+    OkxRestMarketClient(proxy_url="socks5h://u:p@1.2.3.4:6688").fetch_ticker("BTCUSDT")
+    assert seen["proxies"] == {
+        "http": "socks5h://u:p@1.2.3.4:6688",
+        "https": "socks5h://u:p@1.2.3.4:6688",
+    }

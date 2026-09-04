@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -930,6 +931,11 @@ class RuntimeInputAssembler:
         self.active_signal_store = active_signal_store or InMemoryActiveSignalStore()
         self.current_time_supplier = current_time_supplier or (lambda: datetime.now(timezone.utc))
         self.rest_market_client = rest_market_client
+        # OKX 爆仓单：独立客户端（本机交易所是币安，这条只为补爆仓维度），
+        # 按标的记上次抓取时间与已发过的爆仓标记，避免重复累加。
+        self._okx_liquidation_client: Any | None = None
+        self._okx_liquidation_fetched_at: dict[str, Any] = {}
+        self._okx_liquidation_seen: dict[str, set] = {}
         try:
             self.market_context_history_limit = max(
                 1,
@@ -1336,6 +1342,68 @@ class RuntimeInputAssembler:
         )
         return self.rest_market_client
 
+    #: OKX 上市的加密永续。股票永续（NVDA/MU/SKHYNIX 等）是币安独有的，
+    #: OKX 没有对应合约，对这些标的请求只会白白消耗代理带宽。
+    _OKX_LIQUIDATION_SYMBOLS = frozenset({
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "BNBUSDT", "SUIUSDT",
+    })
+
+    #: 爆仓单不需要按行情的节奏拉。行情循环约 15 秒一轮，这里 60 秒足够。
+    _OKX_LIQUIDATION_REFRESH_SECONDS = 60
+
+    def _okx_liquidation_events(self, symbol: str) -> list[dict[str, Any]]:
+        """全市场爆仓单，来自 OKX 公开接口。
+
+        这一维度此前恒为 0：币安的 forceOrders 是 USER_DATA，公开 REST 没有
+        全市场爆仓来源，所以 liquidationNotionalUsd（250000）这道阈值从部署
+        至今没有过任何数据。OKX 的 liquidation-orders 是公开的，但本机直连
+        OKX 超时，必须走 OKX_PROXY_URL 指定的代理。
+
+        **必须按时间戳去重**：接口每次返回最近 N 笔，而下游
+        _liquidation_notional_sum 是对 event_bundle 里的爆仓事件求和——不去重
+        的话同一批爆仓会被每一轮反复累加，15m/60m/240m 三个聚合窗口全部虚高。
+        新闻源上刚踩过同一个坑（同一篇报道被当成新事件重发上百次）。
+        """
+        normalized = str(symbol or "").strip().upper()
+        if normalized not in self._OKX_LIQUIDATION_SYMBOLS:
+            return []
+        proxy_url = str(os.getenv("OKX_PROXY_URL") or "").strip()
+        if not proxy_url:
+            return []
+
+        now = self.current_time_supplier()
+        last_at = self._okx_liquidation_fetched_at.get(normalized)
+        if last_at is not None and (now - last_at).total_seconds() < self._OKX_LIQUIDATION_REFRESH_SECONDS:
+            return []
+
+        if self._okx_liquidation_client is None:
+            self._okx_liquidation_client = OkxRestMarketClient(timeout=15, proxy_url=proxy_url)
+        try:
+            fetched = self._okx_liquidation_client.fetch_liquidations(normalized, limit=100)
+        except Exception as exc:
+            logger.warning("okx liquidation fetch failed symbol=%s error=%s", normalized, exc)
+            return []
+        self._okx_liquidation_fetched_at[normalized] = now
+
+        seen = self._okx_liquidation_seen.setdefault(normalized, set())
+        fresh: list[dict[str, Any]] = []
+        for event in fetched:
+            marker = (int(event.get("event_time_ms") or 0), event.get("price"), event.get("quantity"))
+            if marker in seen:
+                continue
+            seen.add(marker)
+            fresh.append(event)
+        # 只留最近一批标记，避免集合无限增长
+        if len(seen) > 600:
+            self._okx_liquidation_seen[normalized] = set(sorted(seen, reverse=True)[:300])
+        if fresh:
+            logger.info(
+                "okx_liquidation symbol=%s fetched=%s fresh=%s notional=%.0f",
+                normalized, len(fetched), len(fresh),
+                sum(_safe_float(item.get("notionalUsd")) for item in fresh),
+            )
+        return fresh
+
     def _enhanced_market_events(
         self,
         *,
@@ -1402,6 +1470,7 @@ class RuntimeInputAssembler:
                     if normalized_candles:
                         kline_events_by_interval[str(interval)] = normalized_candles
                         events.extend(normalized_candles[-3:])
+        events.extend(self._okx_liquidation_events(symbol))
         combined_events = [*event_bundle, *events]
         kline_context = summarize_kline_context(kline_events_by_interval) if kline_events_by_interval else {}
         wyckoff_15m_bars = _compact_wyckoff_15m_bars(kline_events_by_interval)

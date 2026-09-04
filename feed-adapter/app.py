@@ -4,7 +4,7 @@ from feed_adapter.cached_provider import MinRefreshCachedProvider
 from feed_adapter.config import load_settings
 from feed_adapter.providers.news import RssNewsProvider
 from feed_adapter.providers.onchain import OnchainFlowsProvider
-from feed_adapter.providers.social import RedditSocialProvider
+from feed_adapter.providers.social import RedditRssSocialProvider
 from feed_adapter.server import create_server
 from feed_adapter.service import FeedAdapterService
 
@@ -35,10 +35,13 @@ def build_service() -> FeedAdapterService:
         social_provider=MinRefreshCachedProvider(
             provider_name="social",
             min_refresh_seconds=settings.social_min_refresh_seconds,
-            provider=RedditSocialProvider(
+            provider=RedditRssSocialProvider(
                 listing_urls=settings.social_listing_urls,
                 timeout=settings.request_timeout_seconds,
                 user_agent=settings.user_agent,
+                # 与按标的的刷新窗口同步：一篇 RSS 在一个窗口内只抓一次，
+                # 12 个标的共用，否则 Reddit 会直接 429
+                document_cache_seconds=settings.social_min_refresh_seconds,
             ),
         ),
         onchain_provider=MinRefreshCachedProvider(
