@@ -247,6 +247,38 @@ _DISPATCHABLE_READINESS = {"ready", "watch"}
 _WATCH_STRENGTH_FACTOR = 0.8
 
 
+#: watch 级信号默认不占用 LLM 预算。
+#:
+#: 30 天历史上量过（calibration/readiness_edge.py，209 分钟持仓的前向收益）：
+#:
+#:     ready   n=163   均 +0.3904%   t=3.11  显著为正   扣费后 +0.3104%
+#:     watch   n=1773  均 +0.0092%   t=0.25  与 0 无异   扣费后 -0.0708% 转负
+#:
+#: 两组差异 t=2.92 显著。而 watch : ready = 10.9 : 1——按数量分配预算的话
+#: watch 会拿走约 92%，把唯一被证明有优势的信号挤出去。
+#:
+#: 此前把 watch 提到 LLM_ALLOWED 是为了让系统敢开仓（当时没有数据），
+#: 现在数据说那一步是错的。watch 仍然进信号合成、仍然提供上下文，只是
+#: 不再触发 LLM 决策。想退回旧行为把这个开关打开即可。
+_WATCH_DISPATCH_MODE_KEY = "wyckoffWatchDispatchesLlm"
+
+
+def _wyckoff_dispatch_mode(wyckoff_signal: dict[str, Any], resolved_policy: dict[str, Any]) -> str:
+    readiness = str(wyckoff_signal.get("trade_readiness") or "").strip().lower()
+    if readiness != "watch":
+        return "LLM_ALLOWED"
+    raw = resolved_policy.get(_WATCH_DISPATCH_MODE_KEY)
+    if raw is None:
+        raw = resolved_policy.get("wyckoff_watch_dispatches_llm")
+    if isinstance(raw, bool):
+        allow = raw
+    elif raw in (None, ""):
+        allow = False
+    else:
+        allow = str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+    return "LLM_ALLOWED" if allow else "RULE_ONLY"
+
+
 def _ready_wyckoff_shortterm_signal(feature_snapshot: dict[str, Any]) -> dict[str, Any] | None:
     """提取Wyckoff短期信号
 
@@ -684,7 +716,7 @@ def _current_signals(
                 signal_type="wyckoff_shortterm",
                 direction=str(wyckoff_signal.get("direction") or "neutral"),
                 strength_score=_safe_float(wyckoff_signal.get("strength_score"), 0.5),
-                dispatch_mode="LLM_ALLOWED",
+                dispatch_mode=_wyckoff_dispatch_mode(wyckoff_signal, resolved_policy),
                 now=now,
                 signal_memory_policy=resolved_policy["signal_memory_policy"],
                 # 就绪度进 dedupe key：watch 升级成 ready 是一次新的、更强的

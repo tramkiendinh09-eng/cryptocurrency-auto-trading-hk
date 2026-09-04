@@ -83,7 +83,8 @@ def scan(symbol, config):
             latest_price=float(f15[i]['close']),
             config=config,
         )
-        if r.get('trade_readiness') != 'ready':
+        readiness = r.get('trade_readiness')
+        if readiness not in ('ready', 'watch'):
             continue
         bias = r.get('entry_bias')
         if bias not in ('bullish', 'bearish'):
@@ -100,7 +101,7 @@ def scan(symbol, config):
         ret = (x - e) / e * 100.0
         if bias == 'bearish':
             ret = -ret
-        rows.append({'symbol': symbol, 'bias': bias, 'pct': float(pct), 'ret': ret, 't': t})
+        rows.append({'symbol': symbol, 'bias': bias, 'pct': float(pct), 'ret': ret, 't': t, 'readiness': readiness})
     return rows
 
 

@@ -91,3 +91,42 @@ def test_holding_minutes_survives_mixed_timezone_awareness():
     assert _holding_minutes("2026-09-03 19:00:00", datetime.fromisoformat("2026-09-03 20:00:00+08:00")) == 60
     assert _holding_minutes(None, datetime.now(timezone.utc)) == 0
     assert _holding_minutes("not-a-date", datetime.now(timezone.utc)) == 0
+
+
+# ----------------------------------------------------------------------
+# watch 级 Wyckoff 信号不该占用 LLM 预算
+# ----------------------------------------------------------------------
+
+
+def test_watch_signals_do_not_consume_llm_budget_by_default():
+    """30 天历史上量过（calibration/readiness_edge.py，209 分钟持仓）：
+
+        ready   n=163   均 +0.3904%   t=3.11  显著为正   扣费后 +0.3104%
+        watch   n=1773  均 +0.0092%   t=0.25  与 0 无异   扣费后 -0.0708% 转负
+
+    两组差异 t=2.92 显著。watch : ready = 10.9 : 1，按数量分配预算 watch 会
+    拿走约 92%，把唯一被证明有优势的信号挤出去。
+    """
+    from trade_runtime.trigger_policy import _wyckoff_dispatch_mode
+
+    assert _wyckoff_dispatch_mode({"trade_readiness": "ready"}, {}) == "LLM_ALLOWED"
+    assert _wyckoff_dispatch_mode({"trade_readiness": "watch"}, {}) == "RULE_ONLY"
+
+
+def test_watch_dispatch_can_be_restored_by_config():
+    """旧行为留一个开关，不用改代码就能退回。"""
+    from trade_runtime.trigger_policy import _wyckoff_dispatch_mode
+
+    on = {"wyckoffWatchDispatchesLlm": True}
+    assert _wyckoff_dispatch_mode({"trade_readiness": "watch"}, on) == "LLM_ALLOWED"
+    assert _wyckoff_dispatch_mode({"trade_readiness": "watch"}, {"wyckoffWatchDispatchesLlm": "true"}) == "LLM_ALLOWED"
+    # 蛇形键同样认
+    assert _wyckoff_dispatch_mode({"trade_readiness": "watch"}, {"wyckoff_watch_dispatches_llm": True}) == "LLM_ALLOWED"
+
+
+def test_unknown_readiness_still_dispatches():
+    """ready 之外只降级 watch，别把其它取值一起误伤。"""
+    from trade_runtime.trigger_policy import _wyckoff_dispatch_mode
+
+    assert _wyckoff_dispatch_mode({"trade_readiness": "confirmed"}, {}) == "LLM_ALLOWED"
+    assert _wyckoff_dispatch_mode({}, {}) == "LLM_ALLOWED"
