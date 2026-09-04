@@ -179,6 +179,37 @@ class TradeLifecycleClient:
         return result
 
 
+def _holding_minutes(entry_time: Any, exit_time: datetime) -> int:
+    """持仓分钟数。
+
+    entry_time 是从后端读回来的字符串，按 +08:00 存储且不带时区；exit_time 是
+    now_supplier() 给的 aware UTC。直接相减会抛
+    "can't subtract offset-naive and offset-aware datetimes"，而原实现用
+    `except Exception` 兜住，于是**每一笔平仓的持仓时长都记成 0**——线上那笔
+    实际持有 211 分钟的 SOL 空单，库里就是 0。
+
+    朴素时间按 _BACKEND_TZ 补齐时区（那正是它被写进库时用的时区），不是按 UTC
+    ——按 UTC 会平白差出 8 小时。
+    """
+    if not entry_time:
+        return 0
+    try:
+        if isinstance(entry_time, str):
+            parsed = datetime.fromisoformat(entry_time.strip().replace("Z", "+00:00"))
+        elif isinstance(entry_time, datetime):
+            parsed = entry_time
+        else:
+            return 0
+    except ValueError:
+        return 0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=TradeLifecycleClient._BACKEND_TZ)
+    resolved_exit = exit_time
+    if resolved_exit.tzinfo is None:
+        resolved_exit = resolved_exit.replace(tzinfo=TradeLifecycleClient._BACKEND_TZ)
+    return max(0, int((resolved_exit - parsed).total_seconds() / 60))
+
+
 class TradeLifecycleManager:
     """交易生命周期管理器
 
@@ -333,16 +364,7 @@ class TradeLifecycleManager:
             realized_pnl_pct = ((entry_price - exit_price) / entry_price) * 100 if entry_price > 0 else 0
 
         # 计算持仓时长
-        holding_minutes = 0
-        if entry_time_str:
-            try:
-                if isinstance(entry_time_str, str):
-                    entry_time_dt = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
-                else:
-                    entry_time_dt = entry_time_str
-                holding_minutes = int((exit_time - entry_time_dt).total_seconds() / 60)
-            except Exception:
-                holding_minutes = 0
+        holding_minutes = _holding_minutes(entry_time_str, exit_time)
 
         # 更新生命周期记录
         self.lifecycle_client.update_lifecycle(trace_id, {

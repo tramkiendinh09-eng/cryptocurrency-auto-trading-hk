@@ -71,3 +71,23 @@ def test_an_undeclared_key_really_is_dropped():
     seen = _roundtrip({"trace_id": "t-2", "definitely_not_declared_key": "gone"})
     assert "definitely_not_declared_key" not in DecisionState.__annotations__
     assert seen["definitely_not_declared_key"] is None
+
+
+def test_holding_minutes_survives_mixed_timezone_awareness():
+    """entry_time 从库里读回来是朴素的 +08:00 字符串，exit_time 是 aware UTC。
+
+    原实现直接相减，抛 TypeError 后被 `except Exception` 吞掉，于是每一笔平仓的
+    持仓时长都记成 0——线上那笔实际持有 211 分钟的 SOL 空单，库里就是 0。
+    """
+    from datetime import datetime, timezone
+
+    from trade_runtime.memory.trade_lifecycle import _holding_minutes
+
+    aware_exit = datetime.fromisoformat("2026-09-03 19:29:59+08:00")
+    assert _holding_minutes("2026-09-03 15:58:12", aware_exit) == 211
+    # 两边都朴素时也要算对
+    assert _holding_minutes("2026-09-04 03:06:09", datetime.fromisoformat("2026-09-04 06:34:05")) == 207
+    # 朴素时间按 +08:00 补齐而不是 UTC，否则会平白差出 8 小时
+    assert _holding_minutes("2026-09-03 19:00:00", datetime.fromisoformat("2026-09-03 20:00:00+08:00")) == 60
+    assert _holding_minutes(None, datetime.now(timezone.utc)) == 0
+    assert _holding_minutes("not-a-date", datetime.now(timezone.utc)) == 0
