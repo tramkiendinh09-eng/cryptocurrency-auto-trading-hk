@@ -204,6 +204,28 @@ class DecisionState(TypedDict, total=False):
     current_time: str
     current_position_holding_minutes: int
     entry_price: float
+    # 开仓那一次决策的 trace_id，用来把 ADD/REDUCE/CLOSE 关联回同一笔交易。
+    #
+    # 这几个键必须显式声明。DecisionState 是 LangGraph 的状态通道定义，
+    # 未声明的键会在图里被**静默丢弃**——runner 塞进去，节点里 get 出来就是
+    # None，不报错也不告警。实测后果：盯市快照拿不到 entry_trace_id，于是
+    # 每次 HOLD 都把 position_snapshot.entry_trace_id 覆盖成自己的 trace，
+    # 平仓时按它去找生命周期记录必然 lifecycle_not_found——上线以来没有
+    # 任何一笔交易被记成完整平仓轮次，整条复盘链路是空的。
+    entry_trace_id: str
+    # 持仓风险看护的判定结果。丢了它，supervisor 的 REDUCE->CLOSE 升级
+    # （position_risk_close / invalidation_breached / structure_reversal）
+    # 一次都不会触发。注意 app.py 的硬平仓读的是 runner 的返回值而不是图
+    # 状态，所以那条保护路径不受影响。
+    position_risk_result: dict[str, Any]
+    # supervisor 决定升级成 CLOSE 时写下的标记，由 risk_guard_node 读取。
+    supervisor_exit_escalation: dict[str, Any]
+    # 主管的历史决策，进提示词做短期记忆。
+    recent_supervisor_decisions: list[dict[str, Any]]
+    # 主管的启用策略（EVENT_GATED / RULE_ONLY / LLM_ALLOWED / NO_DISPATCH）。
+    supervisor_policy: dict[str, Any]
+    # execution_node 内部传递的本次订单。
+    last_order: dict[str, Any]
     account_equity: float
     requested_notional: float
     daily_pnl: float

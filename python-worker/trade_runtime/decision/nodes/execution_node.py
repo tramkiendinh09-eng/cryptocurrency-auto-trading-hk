@@ -555,7 +555,14 @@ def _refresh_open_position_mark(state: DecisionState) -> None:
     callback_client.post_position_snapshot(
         {
             "traceId": trace_id,
-            "entryTraceId": state.get("entry_trace_id") or state.get("entryTraceId") or trace_id,
+            # 盯市快照不是开仓，拿不到开仓 trace 时宁可留空，让后端的
+            # normalizePositionSnapshotEntryTraceId 从上一行沿用——退回当前
+            # trace_id 正是把开仓关联写坏的那一步。
+            **(
+                {"entryTraceId": state.get("entry_trace_id") or state.get("entryTraceId")}
+                if (state.get("entry_trace_id") or state.get("entryTraceId"))
+                else {}
+            ),
             "exchangeCode": state.get("exchange", "binance"),
             "symbol": state.get("symbol", ""),
             "side": side,
