@@ -682,6 +682,93 @@ def _invalidation_breached(state: DecisionState, *, position_side: str, invalida
     return False
 
 
+#: 自由裁量平仓的最短持仓分钟数。0 关闭本闸门。
+_MIN_HOLD_KEY = "minHoldMinutesBeforeDiscretionaryClose"
+_MIN_HOLD_DEFAULT_MINUTES = 60
+
+
+def _apply_min_hold_guard(state: DecisionState, decision_payload: dict) -> dict:
+    """拦住"死区内砍亏损单"——只拦这一件事。
+
+    实测 122 个 ready 信号，收益按持仓时长拆开（扣费后）：
+        15m -0.084%  30m -0.088%  45m -0.025%  60m +0.010%
+        90m +0.174%(t=2.57)  120m +0.249%(t=3.32)  180m +0.492%(t=4.16)
+    **60 分钟之前没有优势，是负的**；优势要到 90 分钟才统计显著。
+    同一批信号的最大浮亏中位数是 -0.44%、p25 是 -0.845%——开仓后先逆向是常态，
+    不是入场错了。
+
+    线上代价是实测出来的：4 笔平仓全亏，其中 WDC 在第 24 分钟(-0.63%)、
+    SNDK 在第 42 分钟(-1.11%) 被模型主动 CLOSE，都远没碰到 2% 硬止损。
+    SNDK 砍在最深浮亏 -2.12% 附近，之后按原方向 +3.10%(60m)/+6.15%(120m)/
+    +6.31%(240m)。模拟"风控叫醒即平"：阈值 0.6% 时扣费后 0.362%/胜率 49.2%，
+    从不早平是 0.437%/56.6%——每笔吃掉 0.075 个百分点。
+
+    三处不拦，都是有理由的：
+    - **止盈不拦**：上面的结论是关于"砍亏损单"的，浮盈为正时照常放行。
+    - **风控 close 级不拦**：那是 2% 级别的真失效，不是噪声。
+    - **app.py 的硬平仓根本不经过这里**：它读 runner 返回值、不走图状态，
+      LLM 失败时照样执行。所以这个闸门不会削弱兜底止损。
+    """
+    payload = dict(decision_payload or {})
+    if str(payload.get("action") or "").strip().upper() != "CLOSE":
+        return payload
+    if _current_position_side(state) not in {"long", "short"}:
+        return payload
+
+    min_hold = _min_hold_minutes(state)
+    if min_hold <= 0:
+        return payload
+
+    held = state.get("current_position_holding_minutes")
+    try:
+        held_minutes = int(held)
+    except (TypeError, ValueError):
+        # 拿不到持仓时长就不拦——宁可放行，也不要因为读不到数据而把仓位锁住。
+        return payload
+    if held_minutes >= min_hold:
+        return payload
+
+    risk_result = state.get("position_risk_result") or {}
+    if str(risk_result.get("severity") or "").strip().lower() == "close":
+        return payload
+
+    risk_context = risk_result.get("position_risk_context") or {}
+    pnl_pct = risk_context.get("pnl_pct")
+    try:
+        if pnl_pct is not None and float(pnl_pct) > 0:
+            return payload
+    except (TypeError, ValueError):
+        pass
+
+    payload["action"] = "HOLD"
+    payload["size_hint"] = 0.0
+    payload["min_hold_guard"] = {
+        "blocked_action": "CLOSE",
+        "held_minutes": held_minutes,
+        "min_hold_minutes": min_hold,
+        "original_reason": str(payload.get("summary_reason") or "")[:400],
+    }
+    payload["summary_reason"] = (
+        f"[min_hold_guard] 持仓仅 {held_minutes} 分钟(<{min_hold})且为浮亏，"
+        f"该区间平仓的历史期望为负，降级为 HOLD；2% 硬止损不受影响。"
+        f"原因: {str(payload.get('summary_reason') or '')[:200]}"
+    )
+    return payload
+
+
+def _min_hold_minutes(state: DecisionState) -> int:
+    flags = _supervisor_runtime_flags(state)
+    raw = flags.get(_MIN_HOLD_KEY)
+    if raw is None:
+        raw = flags.get("min_hold_minutes_before_discretionary_close")
+    if raw is None:
+        return _MIN_HOLD_DEFAULT_MINUTES
+    try:
+        return max(0, int(float(raw)))
+    except (TypeError, ValueError):
+        return _MIN_HOLD_DEFAULT_MINUTES
+
+
 def _apply_exit_escalation(state: DecisionState, decision_payload: dict) -> dict:
     payload = dict(decision_payload or {})
     current_side = _current_position_side(state)
@@ -1334,7 +1421,7 @@ def _try_model_supervisor_decision(state: DecisionState, ai_model_config: dict, 
             raw_response_snippet=response.get("content"),
         )
         return None
-    return _clamp_size_hint(state, _apply_exit_escalation(state, decision.model_dump()))
+    return _clamp_size_hint(state, _apply_min_hold_guard(state, _apply_exit_escalation(state, decision.model_dump())))
 
 
 def _resolve_action_and_side(state: DecisionState, bullish_score: int, bearish_score: int) -> tuple[list[dict], str, str]:
@@ -1520,6 +1607,6 @@ def supervisor_agent(state: DecisionState) -> DecisionState:
     gated_payload = _apply_baseline_policy(state, decision_payload, bullish_score, bearish_score)
     return _set_supervisor_decision(
         state,
-        _clamp_size_hint(state, _apply_exit_escalation(state, gated_payload)),
+        _clamp_size_hint(state, _apply_min_hold_guard(state, _apply_exit_escalation(state, gated_payload))),
         prompt_request.get("metadata") or {},
     )
