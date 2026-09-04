@@ -92,3 +92,87 @@ def test_floor_is_off_when_not_configured():
     state = _run("price", state, BASE, budget)["trigger_state"]
     later = _run("price", state, BASE + timedelta(hours=2), budget)
     assert later["budget_blocked"] is True
+
+
+def _run_mixed(state, now, budget=None, news_score=1.5, wyckoff=True):
+    """同一轮里既有强新闻又有 Wyckoff ready —— 线上真实出现的组合。
+
+    news_score 足够强时新闻信号会在 (dispatch_rank, strength_score) 排序里
+    盖过 Wyckoff，成为 primary_signal。
+    """
+    import json
+
+    flags = {"cooldownPolicy": {"globalSeconds": 180}}
+    if budget:
+        flags["llmBudgetPolicy"] = budget
+    config = RuntimeConfig.model_validate({
+        "defaultMode": "paper",
+        "liveEnabled": False,
+        "runtimeFlagsJson": json.dumps(flags),
+    }).model_dump()
+    snapshot = {
+        "symbol": "SOLUSDT",
+        "event_strength": "strong",
+        "price_change_pct": 0.05,
+        "news_score": news_score,
+    }
+    if wyckoff:
+        snapshot["wyckoff_shortterm"] = {
+            "status": "ready", "phase": "markup", "entry_bias": "bullish",
+            "trigger": "breakout_long", "trade_readiness": "ready",
+            "confidence": 0.8, "no_trade_reason": "",
+        }
+    return evaluate_trigger_policy(
+        event_bundle=[
+            {"event_type": "market_tick", "symbol": "SOLUSDT", "price": 100.0},
+            {"event_type": "news", "symbol": "SOLUSDT", "sentiment_score": news_score},
+        ],
+        signal_window_states=[],
+        feature_snapshot=snapshot,
+        runtime_account_context={"current_position_side": "flat"},
+        runtime_config=config,
+        strategy_context={},
+        trigger_state=state,
+        now=now,
+    )
+
+
+def test_news_in_same_round_cannot_take_over_the_ready_cooldown_key():
+    """ready 的冷却键必须自足，不能借用 primary_signal 选出来的 source。
+
+    实测 24h 内 40 个独立 ready setup 有 23 个整块没进过模型，其中 5 个的
+    trigger_source 记的是 news——同一轮里的强新闻当选了 primary，ready 就被
+    记到新闻的冷却键/预算池上，按 primary_signal 判断的分账对它们无效。
+    """
+    # 先让纯新闻（无 Wyckoff）占满它自己的冷却窗口
+    state = _run_mixed({}, BASE, wyckoff=False)["trigger_state"]
+
+    # 60 秒后 Wyckoff ready 出现，同轮仍有强新闻。冷却窗口是 180s，
+    # 若 ready 沿用新闻的键就会被挡。
+    out = _run_mixed(state, BASE + timedelta(seconds=60))
+    assert out["cooldown_blocked"] is False, "ready 不该落在新闻的冷却键上"
+    assert out["dispatch_mode"] == "LLM_ALLOWED"
+
+
+def test_ready_still_dedupes_its_own_repeats():
+    """自足的键不能变成"永不冷却"——同一个 setup 连报 11 次仍要压住。"""
+    state = _run_mixed({}, BASE)["trigger_state"]
+    repeat = _run_mixed(state, BASE + timedelta(seconds=30))
+    assert repeat["cooldown_blocked"] is True, "180s 内的重复 ready 仍应压住"
+
+
+def test_news_budget_exhaustion_does_not_block_ready():
+    """新闻用光预算之后，ready 仍要能进模型。"""
+    budget = {"perSymbolDailyLimit": 2, "rollingWindowLimit": 2}
+    state = {}
+    for i in range(2):
+        state = _run_mixed(state, BASE + timedelta(minutes=i * 10),
+                           budget=budget, wyckoff=False)["trigger_state"]
+    drained = _run_mixed(state, BASE + timedelta(minutes=30),
+                         budget=budget, wyckoff=False)
+    state = drained["trigger_state"]
+    assert drained["budget_blocked"] is True, "新闻自己的额度应已用光"
+
+    ready = _run_mixed(state, BASE + timedelta(minutes=40), budget=budget)
+    assert ready["budget_blocked"] is False, "ready 有独立额度，不该被新闻拖累"
+    assert ready["dispatch_mode"] == "LLM_ALLOWED"

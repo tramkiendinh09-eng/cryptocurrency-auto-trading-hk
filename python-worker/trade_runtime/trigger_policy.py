@@ -1176,9 +1176,41 @@ def evaluate_trigger_policy(
     cooldown_signal_type = str(
         (primary_signal or {}).get("signal_type") or ""
     ).strip().lower() or "none"
-    cooldown_key = (
-        f"{symbol}:{trigger_source or 'none'}:{cooldown_signal_type}:{direction or 'neutral'}"
+
+    # Wyckoff ready 的分账不能依赖"谁当选 primary"。
+    #
+    # primary_signal 是按 (dispatch_rank, strength_score) 选出来的，同一轮里
+    # 一条强新闻会盖过 Wyckoff 信号；trigger_source/direction 也随之变成新闻的。
+    # 上一版按 primary_signal.signal_type 判断分账，对这些轮次完全没生效。
+    #
+    # 实测 24h 内 163 个 ready 原始信号 = 40 个独立 setup（同标的间隔>15min 算
+    # 一个），其中 23 个整块从未进过模型。逐个回溯首个信号的拦截原因：
+    #   预算 15（其中 2 个记在 news 账上）、冷却 8（其中 3 个记在 news 账上）。
+    # 被挡掉的 setup 包含 SAMSUNG 连续 11 次、SKHYNIX 连续 11 次触发——
+    # 一个 setup 重复报了 11 次而模型一次都没看到，这不是"压重复"，是整个
+    # 机会被门控静默丢弃。
+    #
+    # 所以 ready 用一个完全自足的键：只由 symbol 和 Wyckoff 自己的方向决定，
+    # 不掺 trigger_source、不掺 combination 的 direction。这样同一个 setup 在
+    # 不同轮次永远落在同一个键上（压得住重复），而别的维度永远碰不到它
+    # （挤不掉首次）。
+    #
+    # 只认 ready，不认 watch：watch 24h 有 1209 个、ready 只有 163 个，7:1，
+    # 让 watch 进同一个池子等于把池子还给它。watch 本来就是 RULE_ONLY，
+    # 不该也不需要占 ready 的额度。
+    wyckoff_now = _ready_wyckoff_shortterm_signal(normalized_feature_snapshot)
+    is_wyckoff_ready = (
+        wyckoff_now is not None
+        and str(wyckoff_now.get("trade_readiness") or "").strip().lower() == "ready"
     )
+
+    if is_wyckoff_ready:
+        wyckoff_direction = str(wyckoff_now.get("direction") or "neutral").strip().lower()
+        cooldown_key = f"{symbol}:wyckoff_ready:{wyckoff_direction}"
+    else:
+        cooldown_key = (
+            f"{symbol}:{trigger_source or 'none'}:{cooldown_signal_type}:{direction or 'neutral'}"
+        )
     last_cooldown_at = _parse_datetime(next_trigger_state["cooldowns"].get(cooldown_key))
     cooldown_blocked = (
         base_dispatch_mode == "LLM_ALLOWED"
@@ -1204,9 +1236,7 @@ def evaluate_trigger_policy(
     # 不做完全豁免：position_risk 早期就是无上限绕过预算，结果一笔浮亏持仓
     # 把中转网关打到 503。这里只是让 ready 有自己的额度，不与 price_break
     # 那些 hit_rate 0.45 的维度抢同一个池子。
-    budget_namespace = symbol
-    if cooldown_signal_type == "wyckoff_shortterm":
-        budget_namespace = f"{symbol}|wyckoff_ready"
+    budget_namespace = f"{symbol}|wyckoff_ready" if is_wyckoff_ready else symbol
 
     budget_blocked = False
     if base_dispatch_mode == "LLM_ALLOWED" and not cooldown_blocked:
