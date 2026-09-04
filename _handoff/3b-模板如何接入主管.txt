@@ -1,0 +1,60 @@
+1319:def _resolve_supervisor_prompt_request(state: DecisionState, ai_model_config: dict) -> dict:
+1320-    _hydrate_recent_supervisor_decisions(state)
+1321-    synchronize_prompt_memory_state(state)
+1322-    prompt_config = resolve_agent_execution_config(state, "supervisor_agent", binding_scope="SUPERVISOR")
+1323-    metadata = {
+1324-        "prompt_source": "inline",
+1325-        "binding_scope": "SUPERVISOR",
+1326-        "binding_template_code": str((prompt_config or {}).get("template_code") or "").strip(),
+1327-        "fallback_template_code": str((prompt_config or {}).get("fallback_template_code") or "").strip(),
+1328-        "resolved_template_code": None,
+1329-        "output_schema_code": str((prompt_config or {}).get("output_schema_code") or "").strip(),
+1330-        "prompt_template_fallback_used": False,
+1331-        "model_id": (prompt_config or {}).get("model_id"),
+1332-        "model_code": str((prompt_config or {}).get("model_code") or "").strip(),
+1333-        "model_provider": str((prompt_config or {}).get("model_provider") or "").strip(),
+1334-        "resolution_source": str((prompt_config or {}).get("resolution_source") or "").strip(),
+1335-    }
+1336-    if prompt_config is None:
+1337-        return {
+1338-            "prompt": _build_supervisor_prompt(state, ai_model_config),
+1339-            "metadata": metadata,
+1340-            "model_id": metadata["model_id"],
+1341-        }
+1342-    registry = resolve_prompt_template_registry(state)
+1343-    render_context = build_supervisor_render_context(state)
+1344-    template_codes = [
+1345-        (str(prompt_config.get("template_code") or "").strip(), False),
+1346-        (str(prompt_config.get("fallback_template_code") or "").strip(), True),
+1347-    ]
+1348-    for template_code, fallback_used in template_codes:
+1349-        if not template_code or registry is None:
+1350-            continue
+1351-        prompt = render_template(registry.get_template(template_code), render_context)
+1352-        if prompt:
+1353-            metadata["prompt_source"] = "template"
+1354-            metadata["resolved_template_code"] = template_code
+1355-            metadata["prompt_template_fallback_used"] = fallback_used
+1356-            return {
+1357-                "prompt": prompt,
+1358-                "metadata": metadata,
+1359-                "model_id": metadata["model_id"],
+1360-            }
+1361-    metadata["prompt_template_fallback_used"] = bool(
+1362-        metadata["binding_template_code"] or metadata["fallback_template_code"]
+1363-    )
+1364-    return {
+--
+1583:        prompt_request = _resolve_supervisor_prompt_request(state, ai_model_config)
+1584-        state["supervisor_prompt_metadata"] = prompt_request.get("metadata") or {}
+1585-        if _is_ai_model_available(ai_model_config, prompt_request.get("model_id")):
+1586-            model_decision = _try_model_supervisor_decision(state, ai_model_config, prompt_request)
+1587-            if model_decision is not None:
+1588-                return _set_supervisor_decision(state, model_decision, prompt_request.get("metadata") or {})
+1589-            if state.get("ai_call_failed") and not _supervisor_ai_fail_open_enabled(state):
+1590-                return _set_supervisor_decision(
+1591-                    state,
+1592-                    _build_ai_fail_closed_decision(
+1593-                        ai_model_config,
+1594-                        prompt_request.get("metadata") or {},
+1595-                    ).model_dump(),
