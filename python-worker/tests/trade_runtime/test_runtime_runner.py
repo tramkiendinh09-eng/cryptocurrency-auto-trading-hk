@@ -1231,7 +1231,11 @@ def test_runtime_runner_bypass_trigger_guards_preserves_replay_dispatch_outside_
             "symbol_dispatches": dict(runner.trigger_state["budget_state"]["symbol_dispatches"]),
             "global_dispatches": list(runner.trigger_state["budget_state"]["global_dispatches"]),
         },
+        # 每小时保底的计时点。回放不该推进它——推进了就等于一次回放吃掉
+        # 线上一小时的保底额度。
+        "last_llm_dispatch_at": runner.trigger_state.get("last_llm_dispatch_at", ""),
     }
+    live_floor_at = runner.trigger_state.get("last_llm_dispatch_at", "")
 
     second = runner.run_once(
         trace_id="trace-trigger-replay-2",
@@ -1247,6 +1251,9 @@ def test_runtime_runner_bypass_trigger_guards_preserves_replay_dispatch_outside_
     assert first["dispatch_mode"] == "LLM_ALLOWED"
     assert second["dispatch_mode"] == "LLM_ALLOWED"
     assert second["cooldown_blocked"] is False
+    assert runner.trigger_state.get("last_llm_dispatch_at", "") == live_floor_at, (
+        "回放推进了线上的保底计时器"
+    )
     assert second["budget_blocked"] is False
     assert runner.trigger_state == live_trigger_state
 

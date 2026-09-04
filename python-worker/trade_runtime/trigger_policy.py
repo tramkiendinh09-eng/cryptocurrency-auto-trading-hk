@@ -1102,6 +1102,9 @@ def evaluate_trigger_policy(
         "cooldowns": dict(state_payload.get("cooldowns") or {}),
         "dedupe": dict(state_payload.get("dedupe") or {}),
         "budget_state": dict(state_payload.get("budget_state") or {}),
+        # 保底窗口的计时点。漏掉这一行它每轮都会被重置成 None，
+        # 于是「从没派发过」恒成立，保底条件会把预算整个废掉。
+        "last_llm_dispatch_at": state_payload.get("last_llm_dispatch_at") or "",
     }
 
     current_signals = _current_signals(
@@ -1192,10 +1195,23 @@ def evaluate_trigger_policy(
         "usage": {"per_symbol_daily": 0, "per_symbol_window": 0, "global_daily": 0},
         "state": next_trigger_state["budget_state"],
     }
+    # 预算按维度分账，理由与冷却键相同。
+    #
+    # 实测 2 天 228 个可核算的 ready 信号里，156 个（68%）被预算挡掉，而
+    # 被挡掉的那批均收益 +0.28%，是所有分组里最高的——预算是先到先得，
+    # 不看信号质量，等于随机丢掉三分之二有优势的机会。
+    #
+    # 不做完全豁免：position_risk 早期就是无上限绕过预算，结果一笔浮亏持仓
+    # 把中转网关打到 503。这里只是让 ready 有自己的额度，不与 price_break
+    # 那些 hit_rate 0.45 的维度抢同一个池子。
+    budget_namespace = symbol
+    if cooldown_signal_type == "wyckoff_shortterm":
+        budget_namespace = f"{symbol}|wyckoff_ready"
+
     budget_blocked = False
     if base_dispatch_mode == "LLM_ALLOWED" and not cooldown_blocked:
         budget_result = evaluate_llm_budget(
-            symbol=symbol,
+            symbol=budget_namespace,
             llm_budget_policy=resolved_policy["llm_budget_policy"],
             budget_state=next_trigger_state["budget_state"],
             now=now_dt,
@@ -1204,6 +1220,28 @@ def evaluate_trigger_policy(
         )
         next_trigger_state["budget_state"] = budget_result["state"]
         budget_blocked = budget_result["blocked"]
+
+        # 保底：整整一个小时没有任何信号进过模型，就放行一次。
+        #
+        # 预算是按「每标的每天多少次」设的，它保证的是上限，不保证下限——
+        # 完全可能出现某个小时里所有额度都被别的标的用光、系统一次都没评估
+        # 的情况。这条给的是下限：宁可多花一次 LLM 调用，也不要出现整小时
+        # 的评估空窗。
+        floor_seconds = max(0, _safe_int(
+            _pick(resolved_policy["llm_budget_policy"],
+                  "minDispatchIntervalSeconds", "min_dispatch_interval_seconds"),
+            0,
+        ))
+        if budget_blocked and floor_seconds > 0:
+            # 只在「确实有过一次派发、且已经过了保底窗口」时放行。
+            # 没有记录不等于该放行——那是刚启动，预算本来就是满的。
+            last_any = _parse_datetime(next_trigger_state.get("last_llm_dispatch_at"))
+            if last_any is not None and (now_dt - last_any).total_seconds() >= floor_seconds:
+                budget_blocked = False
+                budget_result = dict(budget_result)
+                budget_result["blocked"] = False
+                budget_result["allowed"] = True
+                budget_result["reason_code"] = "hourly_floor_release"
 
     dispatch_mode = base_dispatch_mode
     llm_allowed = dispatch_mode == "LLM_ALLOWED"
@@ -1219,6 +1257,13 @@ def evaluate_trigger_policy(
 
     if base_dispatch_mode == "LLM_ALLOWED" and not cooldown_blocked and not budget_blocked and not bypass_cooldown:
         next_trigger_state["cooldowns"][cooldown_key] = now_dt.isoformat()
+    if dispatch_mode == "LLM_ALLOWED" and not bypass_budget and not bypass_cooldown:
+        # 保底窗口按「最近一次真正进模型」计时，不是按「产生了信号」。
+        #
+        # 绕过门控的路径（回放、持仓风险抢占）不记这个时间：回放本该对线上
+        # 门控零副作用，记了会把线上的保底计时器往后推，等于一次回放就吃掉
+        # 一小时的保底额度。
+        next_trigger_state["last_llm_dispatch_at"] = now_dt.isoformat()
 
     return {
         "dispatch_mode": dispatch_mode,
