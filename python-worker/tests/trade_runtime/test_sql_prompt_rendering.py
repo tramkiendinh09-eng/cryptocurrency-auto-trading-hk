@@ -5,6 +5,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from trade_runtime.prompting.render_context_builder import (
     build_agent_render_context,
     build_supervisor_render_context,
@@ -15,8 +17,32 @@ from trade_runtime.prompting.renderers import VARIABLE_PATTERN, render_template
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _require_sql(path: Path) -> Path:
+    """这两份 SQL 从未被提交过——作者把 sql/ai_trading.sql 加进了 .gitignore。
+
+    于是依赖它们的两个用例在任何一份克隆上都恒为 FileNotFoundError，长期挂着
+    被当成"已知失败"，也就掩盖了同一个套件里真正的新失败。改成显式 skip，
+    并指明本部署上等价的校验在哪里执行。
+
+    本部署的模板真实来源是数据库，等价校验由
+    `trade_runtime.prompting.validate_live_templates` 执行（已接入 observe.sh）：
+    它复用同样的 build_*_render_context 与 render_template，判定"模板占位符是否
+    都在渲染上下文里"。这条判定不能省——render_template_content 对上下文里没有
+    的键做的是 get(key, "")，**静默替换成空字符串**，模板里写错一个变量名，
+    模型看到的就是少了一整段的提示词，而调用成功、日志干净。
+    """
+    if not path.exists():
+        pytest.skip(
+            f"{path.relative_to(_REPO_ROOT)} 未随仓库提交（上游 .gitignore 掉了）；"
+            "本部署的等价校验是 "
+            "`python -m trade_runtime.prompting.validate_live_templates`，"
+            "已接入 deploy/native/observe.sh"
+        )
+    return path
+
+
 def _load_prompt_templates_from_sql(path: Path) -> dict[str, dict[str, object]]:
-    text = path.read_text(encoding="utf-8")
+    text = _require_sql(path).read_text(encoding="utf-8")
     templates: dict[str, dict[str, object]] = {}
     for match in re.finditer(r"INSERT INTO `prompt_template` VALUES \((.*)\);", text):
         row = ast.literal_eval(f"({match.group(1)})")

@@ -146,6 +146,23 @@ for phase in before after; do
 done
 line
 
+# 模板占位符校验。
+#
+# render_template_content 对上下文里没有的键做的是 get(key, "")——**静默替换成
+# 空字符串**。所以模板里写错一个变量名，模型看到的就是少了一整段的提示词，
+# 而调用成功、日志干净、什么信号都没有。这是必须主动去查的一类失败。
+#
+# 原本 tests/trade_runtime/test_sql_prompt_rendering.py 做的正是这件事，但它从
+# sql/ai_trading.sql 读模板，而作者把那个文件加进了 .gitignore、从未提交，于是
+# 那两个测试在本部署上恒为 FileNotFoundError，这条校验从部署起就没生效过。
+echo "提示词模板"
+if [ -x /opt/dca/venv/bin/python ] && [ -d /opt/dca/app/python-worker ]; then
+  (cd /opt/dca/app/python-worker && /opt/dca/venv/bin/python -m trade_runtime.prompting.validate_live_templates 2>&1)     || say "校验" "**有模板渲染不完整，见上**"
+else
+  say "校验" "跳过（未找到 worker 运行环境）"
+fi
+line
+
 echo "判断口径"
 echo "  · 多数标的「占日上限」接近 100% → 预算是瓶颈，可以按 CALIBRATION-MULTI.md"
 echo "    的弹性表提高 perSymbolDailyLimit 与 rollingWindowLimit（两个要一起动，"
