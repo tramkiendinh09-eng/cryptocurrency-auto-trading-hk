@@ -51,11 +51,11 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         insert into agent_memory (
             memory_key, agent_code, symbol, memory_type, market_regime, event_tags_json,
             direction, action, lesson_text, evidence_json, outcome_json, quality_score,
-            confidence, source_trace_id, enabled
+            confidence, source_trace_id, enabled, created_at, updated_at
         ) values (
             #{memoryKey}, #{agentCode}, #{symbol}, #{memoryType}, #{marketRegime}, #{eventTagsJson},
             #{direction}, #{action}, #{lessonText}, #{evidenceJson}, #{outcomeJson}, #{qualityScore},
-            #{confidence}, #{sourceTraceId}, #{enabled}
+            #{confidence}, #{sourceTraceId}, #{enabled}, now(), now()
         )
     </insert>
 
@@ -67,13 +67,15 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     <update id="markMemoryUsed">
         update agent_memory
         set usage_count = usage_count + 1,
-            last_used_at = now()
+            last_used_at = now(),
+            updated_at = now()
         where id = #{id}
     </update>
 
     <update id="disableMemory">
         update agent_memory
-        set enabled = 0
+        set enabled = 0,
+            updated_at = now()
         where id = #{id}
     </update>
 </mapper>

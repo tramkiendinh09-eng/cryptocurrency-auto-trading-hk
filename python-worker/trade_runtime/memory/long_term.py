@@ -318,10 +318,32 @@ class HttpLongTermMemoryStore:
         )
         response.raise_for_status()
         payload = response.json()
+
+        # RuoYi 的认证失败返回 **HTTP 200**，把 401 装在 body 的 code 里，
+        # 所以上面的 raise_for_status() 不会抛。之前 add 端点漏标 @Anonymous，
+        # 每一次写入都被拒，而这里只是静静地 return {}，上层归成笼统的
+        # memory_store_create_failed——agent_memory 表从部署起一行都没有，
+        # 而日志里看不出是鉴权问题。这里必须把 code 单独判出来并记下来。
+        code = payload.get("code") if isinstance(payload, dict) else None
+        if code is not None and str(code) not in {"200", "0"}:
+            logger.error(
+                "agent memory create rejected code=%s msg=%s",
+                code,
+                (payload or {}).get("msg"),
+            )
+            return {}
+
         data = payload.get("data") if isinstance(payload, dict) else payload
-        if isinstance(data, dict):
+        if isinstance(data, dict) and data:
             return data
         if isinstance(data, int) and not isinstance(data, bool) and data > 0:
+            created = dict(memory)
+            created.setdefault("id", None)
+            return created
+
+        # RuoYi 的 toAjax() 成功时只返回 {"code":200,"msg":"操作成功"}，**不带 data**。
+        # 按 data 判成败会把成功的写入也报成失败。
+        if code is not None and str(code) in {"200", "0"}:
             created = dict(memory)
             created.setdefault("id", None)
             return created
