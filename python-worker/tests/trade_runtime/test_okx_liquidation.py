@@ -126,3 +126,79 @@ def test_upstream_failure_does_not_break_the_market_path(monkeypatch):
 
     a._okx_liquidation_client = _Boom(INSTRUMENTS, [])
     assert a._okx_liquidation_events("SOLUSDT") == []
+
+
+# ----------------------------------------------------------------------
+# 持仓结构：多空人数比与主动买卖量比
+# ----------------------------------------------------------------------
+
+
+class _PositioningClient(OkxRestMarketClient):
+    def __init__(self, ratio_rows, taker_rows, fail=None):
+        super().__init__(timeout=1, proxy_url="socks5h://user:pw@127.0.0.1:1")
+        self._ratio_rows = ratio_rows
+        self._taker_rows = taker_rows
+        self._fail = fail or set()
+
+    def _get(self, path, params):
+        if "long-short-account-ratio" in path:
+            if "ratio" in self._fail:
+                raise RuntimeError("upstream down")
+            return {"code": "0", "data": self._ratio_rows}
+        if "taker-volume" in path:
+            if "taker" in self._fail:
+                raise RuntimeError("upstream down")
+            return {"code": "0", "data": self._taker_rows}
+        return {"code": "0", "data": []}
+
+
+def test_positioning_parses_both_metrics():
+    client = _PositioningClient(
+        [["1788500000000", "1.98"]],
+        [["1788500000000", "500000", "1250000"]],
+    )
+    got = client.fetch_positioning("SOLUSDT")
+    assert got["long_short_account_ratio"] == pytest.approx(1.98)
+    # 返回顺序是 [时间, 卖出量, 买入量]，买卖比 = 买 / 卖
+    assert got["taker_buy_sell_ratio"] == pytest.approx(2.5)
+    assert got["taker_buy_volume"] == pytest.approx(1250000)
+    assert got["taker_sell_volume"] == pytest.approx(500000)
+
+
+def test_one_endpoint_failing_does_not_lose_the_other():
+    client = _PositioningClient(
+        [["1788500000000", "1.98"]],
+        [["1788500000000", "500000", "1250000"]],
+        fail={"taker"},
+    )
+    got = client.fetch_positioning("SOLUSDT")
+    assert got["long_short_account_ratio"] == pytest.approx(1.98)
+    assert "taker_buy_sell_ratio" not in got
+
+
+def test_positioning_is_cached_between_calls(monkeypatch):
+    monkeypatch.setenv("OKX_PROXY_URL", "socks5h://user:pw@127.0.0.1:1")
+    clock = [datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)]
+    a = _assembler(clock)
+    a._okx_positioning_cache = {}
+    client = _PositioningClient(
+        [["1788500000000", "1.98"]], [["1788500000000", "5", "10"]])
+    a._okx_liquidation_client = client
+    calls = []
+    original = client.fetch_positioning
+    client.fetch_positioning = lambda *args, **kw: (calls.append(1), original(*args, **kw))[1]
+
+    a._okx_positioning("SOLUSDT")
+    a._okx_positioning("SOLUSDT")
+    assert len(calls) == 1, "刷新窗口内不该重复请求"
+    clock[0] += timedelta(seconds=301)
+    a._okx_positioning("SOLUSDT")
+    assert len(calls) == 2
+
+
+def test_stock_perps_have_no_positioning(monkeypatch):
+    monkeypatch.setenv("OKX_PROXY_URL", "socks5h://user:pw@127.0.0.1:1")
+    clock = [datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)]
+    a = _assembler(clock)
+    a._okx_positioning_cache = {}
+    assert a._okx_positioning("NVDAUSDT") == {}

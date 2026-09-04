@@ -198,3 +198,38 @@ class TestFreshness:
         items = provider.fetch("NVDAUSDT")
         assert len(items) == 1, "旧新闻仍应返回"
         assert items[0]["score"] < 0.80, "但不应越过触发线"
+
+
+class TestSectorLevelNews:
+    """不点名任何公司、却对整个板块重大的新闻。
+
+    「US announces new chip export controls」对 6 个半导体标的全都是重大消息，
+    但一个公司名都不提，此前被 matches_symbol 整条过滤掉。实测一条芯片政策
+    查询返回 32 条，只有 4 条（12%）能命中公司名；补上板块短语后升到 15 条（47%）。
+    """
+
+    def test_policy_news_reaches_every_semiconductor_symbol(self):
+        headline = "US announces new chip export controls on China"
+        for symbol in ("NVDAUSDT", "MUUSDT", "SKHYNIXUSDT", "SAMSUNGUSDT", "WDCUSDT", "SNDKUSDT"):
+            assert matches_symbol(symbol, headline, "")
+
+    def test_crypto_symbols_do_not_take_sector_news(self):
+        """加密新闻本来就会点名币种；按板块广播只会制造噪声。"""
+        headline = "US announces new chip export controls on China"
+        for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"):
+            assert not matches_symbol(symbol, headline, "")
+
+    def test_a_bare_chip_does_not_match(self):
+        """单个 chip 会命中薯片、赌场筹码和一切科技报道，加进来等于把这道
+        过滤取消掉——和 _EVENT_KEYWORDS 不收 chip/memory 泛称是同一条理由。"""
+        assert not matches_symbol("MUUSDT", "Casino chip theft in Las Vegas", "")
+        assert not matches_symbol("NVDAUSDT", "New potato chip flavor launches", "")
+
+    def test_naming_another_company_still_does_not_match(self):
+        assert not matches_symbol("SKHYNIXUSDT", "Micron raises guidance", "")
+
+    def test_negation_guard_applies_to_sector_phrases_too(self):
+        assert not matches_symbol("NVDAUSDT", "Company says no export control impact expected", "")
+
+    def test_company_named_path_is_unchanged(self):
+        assert matches_symbol("NVDAUSDT", "Nvidia to acquire Hugging Face", "")

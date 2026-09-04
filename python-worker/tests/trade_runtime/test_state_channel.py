@@ -168,3 +168,57 @@ def test_wyckoff_config_handles_none_and_garbage():
     assert _wyckoff_shortterm_config(None, {}) == {}
     assert _wyckoff_shortterm_config("not-a-config", {}) == {}
     assert _wyckoff_shortterm_config(123, {}) == {}
+
+
+def test_cooldown_is_per_signal_type_not_just_per_source():
+    """不同的行情维度必须各占各的冷却窗口。
+
+    此前冷却键是 symbol:source:direction，而 Wyckoff 的 source 就是 "market"
+    ——和 price_break、mark_price_deviation 共用同一个键。一个价格突破先占了
+    5 分钟冷却，3 分钟后真正的 Wyckoff ready 就被挡在门外，连模型都看不到。
+    实测近 6 小时 12 个 ready 信号里 5 个是这样丢掉的。
+
+    这不是「少几次机会」：CALIBRATION.md 里 price_break 全网格 hit_rate
+    0.45~0.47 低于 0.5051 基准，而 Wyckoff ready 是 t=3.11 显著为正——没有
+    优势的维度在挤掉唯一有优势的那个。
+    """
+    from datetime import datetime, timezone
+
+    from trade_runtime.config import RuntimeConfig
+    from trade_runtime.trigger_policy import evaluate_trigger_policy
+
+    def run(signal_type, state, now):
+        return evaluate_trigger_policy(
+            event_bundle=[{"event_type": "market_tick", "symbol": "SOLUSDT", "price": 100.0}],
+            feature_snapshot={
+                "symbol": "SOLUSDT",
+                "event_strength": "strong",
+                # 第二次把价格变动降到阈值以下，让 Wyckoff 成为唯一信号，
+                # 否则主信号仍是 price_break，测的就不是维度隔离了
+                "price_change_pct": 3.0 if signal_type == "price" else 0.05,
+                "wyckoff_shortterm": {
+                    "status": "ready", "phase": "markup", "entry_bias": "bullish",
+                    "trigger": "breakout_long", "trade_readiness": "ready",
+                    "confidence": 0.8, "no_trade_reason": "",
+                } if signal_type == "wyckoff" else {},
+            },
+            signal_window_states=[],
+            runtime_account_context={"current_position_side": "flat"},
+            runtime_config=RuntimeConfig(defaultMode="paper", liveEnabled=False).model_dump(),
+            strategy_context={},
+            trigger_state=state,
+            now=now,
+        )
+
+    base = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    state = {}
+    first = run("price", state, base)
+    state = first["trigger_state"]
+    # 价格维度先占了冷却
+    assert first["dispatch_mode"] == "LLM_ALLOWED"
+
+    # 三分钟后 Wyckoff ready 到来：同一个标的、同一个 source、同一个方向，
+    # 但它是另一个维度，不该被上面那次的冷却挡住
+    later = base.replace(minute=3)
+    second = run("wyckoff", state, later)
+    assert second["cooldown_blocked"] is False, "Wyckoff ready 不该被价格维度的冷却挡掉"

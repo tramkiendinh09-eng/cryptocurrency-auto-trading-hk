@@ -146,6 +146,52 @@ class OkxRestMarketClient:
                 events.append(event)
         return events
 
+    def fetch_positioning(self, symbol: str, *, period: str = "5m") -> dict[str, Any]:
+        """持仓结构：多空人数比与主动买卖量比。
+
+        当前系统一个持仓结构维度都没有——只有价格、量、持仓量、资金费率。
+        这两个数说的是"市场在往哪边站"，和价格走势是不同的信息。
+
+        **只做上下文，不产生触发信号。** 没有历史归档做不了回测，而这一整轮
+        的教训就是：未经验证的方向性信号会去抢 ready 的 LLM 预算，而 ready 是
+        唯一被证明有优势的（30 天 163 个样本，t=3.11）。要让它触发，先拿它跑
+        一遍 calibration，别拍脑袋。
+
+        取不到就返回空字典：这是补充上下文，不该让行情链路因它失败。
+        """
+        inst_id = format_okx_inst_id(symbol)
+        currency = inst_id.split("-")[0]
+        if not currency:
+            return {}
+        result: dict[str, Any] = {}
+        try:
+            payload = self._get(
+                "/api/v5/rubik/stat/contracts/long-short-account-ratio",
+                {"ccy": currency, "period": period},
+            )
+            rows = payload.get("data") or []
+            if rows and isinstance(rows[0], list) and len(rows[0]) >= 2:
+                result["long_short_account_ratio"] = _safe_float(rows[0][1])
+        except Exception:
+            pass
+        try:
+            payload = self._get(
+                "/api/v5/rubik/stat/taker-volume",
+                {"ccy": currency, "instType": "CONTRACTS", "period": period},
+            )
+            rows = payload.get("data") or []
+            if rows and isinstance(rows[0], list) and len(rows[0]) >= 3:
+                # 交易所返回顺序是 [时间, 卖出量, 买入量]
+                sell_volume = _safe_float(rows[0][1])
+                buy_volume = _safe_float(rows[0][2])
+                if sell_volume > 0:
+                    result["taker_buy_sell_ratio"] = round(buy_volume / sell_volume, 6)
+                result["taker_buy_volume"] = buy_volume
+                result["taker_sell_volume"] = sell_volume
+        except Exception:
+            pass
+        return result
+
     def fetch_ticker(self, symbol: str) -> dict[str, Any]:
         item = self._first_data_item("/api/v5/market/ticker", {"instId": format_okx_inst_id(symbol)})
         quote_volume = item.get("volCcyQuote24h") or item.get("volCcy24h") or item.get("turnover") or 0.0

@@ -1160,7 +1160,22 @@ def evaluate_trigger_policy(
 
     source_types = combination_match["sources"] if combination_match is not None else ([str(primary_signal.get("source_type") or "")] if primary_signal is not None else [])
     cooldown_seconds = max(0, _safe_int(_pick(resolved_policy["cooldown_policy"], "globalSeconds", "global_seconds"), 0))
-    cooldown_key = f"{symbol}:{trigger_source or 'none'}:{direction or 'neutral'}"
+    # 冷却键带上 signal_type，让不同的行情维度各占各的窗口。
+    #
+    # 此前是 symbol:source:direction，而 Wyckoff 的 source 就是 "market"——
+    # 和 price_break、mark_price_deviation 共用同一个键。于是一个价格突破先
+    # 占了 5 分钟冷却，3 分钟后真正的 Wyckoff ready 就被挡在门外，连模型都
+    # 看不到。实测近 6 小时 12 个 ready 信号里，5 个是这样丢掉的。
+    #
+    # 这不是"少几次机会"：CALIBRATION.md 里 price_break 全网格 hit_rate
+    # 0.45~0.47，低于 0.5051 的基准；而 Wyckoff ready 是 30 天 163 个样本、
+    # 均 +0.3904%、t=3.11 显著为正。没有优势的维度在挤掉唯一有优势的那个。
+    cooldown_signal_type = str(
+        (primary_signal or {}).get("signal_type") or ""
+    ).strip().lower() or "none"
+    cooldown_key = (
+        f"{symbol}:{trigger_source or 'none'}:{cooldown_signal_type}:{direction or 'neutral'}"
+    )
     last_cooldown_at = _parse_datetime(next_trigger_state["cooldowns"].get(cooldown_key))
     cooldown_blocked = (
         base_dispatch_mode == "LLM_ALLOWED"

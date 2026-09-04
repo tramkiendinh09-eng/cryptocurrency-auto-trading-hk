@@ -936,6 +936,7 @@ class RuntimeInputAssembler:
         self._okx_liquidation_client: Any | None = None
         self._okx_liquidation_fetched_at: dict[str, Any] = {}
         self._okx_liquidation_seen: dict[str, set] = {}
+        self._okx_positioning_cache: dict[str, tuple] = {}
         try:
             self.market_context_history_limit = max(
                 1,
@@ -1351,6 +1352,37 @@ class RuntimeInputAssembler:
     #: 爆仓单不需要按行情的节奏拉。行情循环约 15 秒一轮，这里 60 秒足够。
     _OKX_LIQUIDATION_REFRESH_SECONDS = 60
 
+    #: 持仓结构比爆仓单变化慢，取得更稀一点。
+    _OKX_POSITIONING_REFRESH_SECONDS = 300
+
+    def _okx_positioning(self, symbol: str) -> dict[str, Any]:
+        """多空人数比与主动买卖量比，作为给模型的上下文。
+
+        不产生触发信号，理由见 OkxRestMarketClient.fetch_positioning。
+        复用爆仓单那条链路的代理与客户端。
+        """
+        normalized = str(symbol or "").strip().upper()
+        if normalized not in self._OKX_LIQUIDATION_SYMBOLS:
+            return {}
+        proxy_url = str(os.getenv("OKX_PROXY_URL") or "").strip()
+        if not proxy_url:
+            return {}
+        now = self.current_time_supplier()
+        cached = self._okx_positioning_cache.get(normalized)
+        if cached is not None:
+            fetched_at, payload = cached
+            if (now - fetched_at).total_seconds() < self._OKX_POSITIONING_REFRESH_SECONDS:
+                return payload
+        if self._okx_liquidation_client is None:
+            self._okx_liquidation_client = OkxRestMarketClient(timeout=15, proxy_url=proxy_url)
+        try:
+            payload = self._okx_liquidation_client.fetch_positioning(normalized)
+        except Exception as exc:
+            logger.warning("okx positioning fetch failed symbol=%s error=%s", normalized, exc)
+            payload = {}
+        self._okx_positioning_cache[normalized] = (now, payload)
+        return payload
+
     def _okx_liquidation_events(self, symbol: str) -> list[dict[str, Any]]:
         """全市场爆仓单，来自 OKX 公开接口。
 
@@ -1550,6 +1582,7 @@ class RuntimeInputAssembler:
             "kline_context": kline_context,
             "wyckoff_shortterm": wyckoff_shortterm,
             "wyckoff_15m_bars": wyckoff_15m_bars,
+            **self._okx_positioning(symbol),
         }
         return [*events, market_metric], {"kline_context": kline_context, "market_metric": market_metric}
 
