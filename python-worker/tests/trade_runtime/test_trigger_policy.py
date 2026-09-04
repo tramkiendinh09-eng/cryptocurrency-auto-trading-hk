@@ -257,7 +257,7 @@ def test_trigger_policy_escalates_ready_wyckoff_shortterm_signal_to_llm_allowed(
     assert len(decision["selected_agents"]) >= 2
 
 
-def test_trigger_policy_escalates_wyckoff_watch_signal_for_evaluation():
+def test_trigger_policy_keeps_wyckoff_watch_out_of_the_llm_budget():
     decision = evaluate_trigger_policy(
         event_bundle=[{"event_type": "market_tick", "symbol": "ETHUSDT", "price": 2285.0}],
         feature_snapshot={
@@ -283,12 +283,24 @@ def test_trigger_policy_escalates_wyckoff_watch_signal_for_evaluation():
         now=datetime(2026, 4, 17, 8, 1, tzinfo=timezone.utc),
     )
 
-    # 曾经这里是 NO_DISPATCH：ready 要七项条件连续全过，差一项就降级成
-    # watch 然后被整条丢掉，模型连看都看不到。实测这是决策几乎恒为 SKIP
-    # 的主因——绝大多数 SKIP 的理由都是 "Wyckoff status/readiness avoid"。
-    # watch 的含义是"结构成立，差一项确认"，那正该让模型看一眼再定夺。
-    assert decision["dispatch_mode"] == "LLM_ALLOWED"
-    assert decision["llm_allowed"] is True
+    # 这条断言反转过一次，两次都有据可依，记下来免得再来回改：
+    #
+    # 最早是 NO_DISPATCH——ready 要七项条件连续全过，差一项就降级成 watch
+    # 然后被整条丢掉。当时为了让系统敢开仓，把 watch 提到了 LLM_ALLOWED，
+    # 那一步没有数据支撑，只是「总得先动起来」。
+    #
+    # 现在有数据了（calibration/readiness_edge.py，30 天、209 分钟持仓）：
+    #
+    #     ready   n=163   均 +0.3904%   t=3.11  显著为正   扣费后 +0.3104%
+    #     watch   n=1773  均 +0.0092%   t=0.25  与 0 无异   扣费后 -0.0708% 转负
+    #
+    # 两组差异 t=2.92 显著，而 watch : ready = 10.9 : 1——按数量分配预算的话
+    # watch 会拿走约 92%，把唯一被证明有优势的信号挤出去。所以 watch 降回
+    # RULE_ONLY：它仍然进信号合成、仍然提供上下文，只是不再触发 LLM 决策。
+    assert decision["dispatch_mode"] == "RULE_ONLY"
+    assert decision["llm_allowed"] is False
+    # 关键：信号本身没有被丢掉，只是不占预算——这正是与最早那版 NO_DISPATCH
+    # 的区别。
     assert any(item["signal_type"] == "wyckoff_shortterm" for item in decision["active_signals"])
 
 

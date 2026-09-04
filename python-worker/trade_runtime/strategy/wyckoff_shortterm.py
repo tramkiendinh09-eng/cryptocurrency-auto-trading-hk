@@ -31,6 +31,23 @@ _DEFAULT_WYCKOFF_SHORTTERM_CONFIG = {
     "trapVolumeRatio": 1.8,
     "trapWickRatio": 0.45,
     "trapCooldownBars": 2,
+    # ---- macro range-position filter (added after the 7-day review) ----
+    # The 1h breakout logic above only knows the previous four 15m bars. These
+    # keys add a second dimension: where the current price sits inside the
+    # 4h and 24h ranges. A "confirmed breakout" printed at the 95th percentile
+    # of the 24h range is, in a mean-reverting minute market, a local top.
+    #
+    # Thresholds below are PROVISIONAL. They are chosen only so that the two
+    # losing entries in the review (SOL long @ 95%, SOL short @ 17%) would
+    # have been vetoed. Run the calibration sweep (see README) and overwrite
+    # them from runtime config before trusting them.
+    "macroPositionEnabled": True,
+    "macroPositionPrimaryWindow": "24h",   # window that is allowed to veto
+    "macroPositionVetoPercentile": 0.80,   # long veto if pos >= 0.80, short veto if pos <= 0.20
+    "macroPositionWarnPercentile": 0.70,   # soft confidence penalty band
+    "macroPositionMaxDistanceToExtremePct": 1.0,  # also veto if within 1% of the 24h high/low
+    "macroPositionMinSamples24h": 12,      # minimum bars required to trust the 24h window
+    "macroPositionMinSamples4h": 8,
 }
 
 
@@ -207,6 +224,134 @@ def _clamp_confidence(value: float) -> float:
     return max(0.0, min(1.0, round(value, 4)))
 
 
+def _range_position(
+    candles: list[dict[str, Any]],
+    *,
+    bars: int,
+    price: float,
+    min_samples: int,
+) -> dict[str, Any] | None:
+    """Where does `price` sit inside the high/low range of the last `bars` candles?
+
+    Returns None when there is not enough history to trust the window. The
+    caller must treat None as "no opinion", never as "safe".
+    """
+    ordered = _sort_candles(candles)
+    if bars <= 0 or price <= 0 or len(ordered) < max(1, min_samples):
+        return None
+    window = ordered[-bars:]
+    high_price = max(_high(item) for item in window)
+    low_price = min(_low(item) for item in window)
+    # The live price may already be outside the closed-candle range.
+    high_price = max(high_price, price)
+    low_price = min(low_price, price)
+    span = high_price - low_price
+    if span <= 0 or low_price <= 0:
+        return None
+    position = (price - low_price) / span
+    return {
+        "sample_count": len(window),
+        "high": round(high_price, 8),
+        "low": round(low_price, 8),
+        "range_pct": round((span / low_price) * 100.0, 6),
+        "position_pct": round(max(0.0, min(1.0, position)), 6),
+        "distance_to_high_pct": round(((high_price - price) / price) * 100.0, 6),
+        "distance_to_low_pct": round(((price - low_price) / price) * 100.0, 6),
+    }
+
+
+def _macro_position_snapshot(
+    candles_by_interval: dict[str, list[dict[str, Any]]],
+    *,
+    price: float,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the 4h / 24h range-position block that goes into feature_snapshot.
+
+    Source preference:
+      24h -> 24 x 1h candles, else 96 x 15m candles
+      4h  -> 16 x 15m candles, else 4 x 1h candles
+    """
+    fifteen = candles_by_interval.get("15m") or []
+    one_hour = candles_by_interval.get("1h") or candles_by_interval.get("60m") or []
+    min_24h = max(1, _config_int(config, "macroPositionMinSamples24h", "macro_position_min_samples_24h"))
+    min_4h = max(1, _config_int(config, "macroPositionMinSamples4h", "macro_position_min_samples_4h"))
+
+    window_24h = _range_position(one_hour, bars=24, price=price, min_samples=min_24h)
+    source_24h = "1h"
+    if window_24h is None:
+        window_24h = _range_position(fifteen, bars=96, price=price, min_samples=min_24h * 4)
+        source_24h = "15m" if window_24h else "insufficient"
+
+    window_4h = _range_position(fifteen, bars=16, price=price, min_samples=min_4h)
+    source_4h = "15m"
+    if window_4h is None:
+        window_4h = _range_position(one_hour, bars=4, price=price, min_samples=min(4, min_4h))
+        source_4h = "1h" if window_4h else "insufficient"
+
+    return {
+        "status": "ready" if window_24h else ("partial" if window_4h else "insufficient"),
+        "price": round(price, 8),
+        "window_24h": window_24h or {},
+        "window_24h_source": source_24h,
+        "window_4h": window_4h or {},
+        "window_4h_source": source_4h,
+    }
+
+
+def _apply_macro_position_filter(
+    *,
+    entry_bias: str,
+    trade_readiness: str,
+    confidence: float,
+    no_trade_reason: str,
+    confirmation_needed: list[str],
+    macro: dict[str, Any],
+    config: dict[str, Any],
+) -> tuple[str, float, str, str, str]:
+    """Veto longs printed at the top of the macro range and shorts at the bottom.
+
+    Returns (trade_readiness, confidence, no_trade_reason, verdict, verdict_evidence).
+    The filter only ever tightens: it can turn ready/watch into avoid, never the
+    reverse. It is direction-aware and does nothing when entry_bias is neutral.
+    """
+    if not _config_bool(config, "macroPositionEnabled", "macro_position_enabled"):
+        return trade_readiness, confidence, no_trade_reason, "disabled", ""
+    if entry_bias not in {"bullish", "bearish"}:
+        return trade_readiness, confidence, no_trade_reason, "not_applicable", ""
+
+    primary = str(_pick_config(config, "macroPositionPrimaryWindow", "macro_position_primary_window") or "24h").strip().lower()
+    window = macro.get("window_4h") if primary == "4h" else macro.get("window_24h")
+    if not window:
+        # No history to judge from. Do NOT silently pass: flag it so the
+        # supervisor prompt can see the gap and be conservative.
+        return trade_readiness, confidence, no_trade_reason, "insufficient_history", f"window={primary}"
+
+    veto_pct = _config_float(config, "macroPositionVetoPercentile", "macro_position_veto_percentile")
+    warn_pct = _config_float(config, "macroPositionWarnPercentile", "macro_position_warn_percentile")
+    max_distance_pct = _config_float(config, "macroPositionMaxDistanceToExtremePct", "macro_position_max_distance_to_extreme_pct")
+    position = _safe_float(window.get("position_pct"))
+    to_high = _safe_float(window.get("distance_to_high_pct"))
+    to_low = _safe_float(window.get("distance_to_low_pct"))
+    evidence = f"window={primary}, position_pct={position:.3f}, to_high_pct={to_high:.3f}, to_low_pct={to_low:.3f}"
+
+    if entry_bias == "bullish":
+        if position >= veto_pct or (max_distance_pct > 0 and to_high <= max_distance_pct):
+            confirmation_needed.append(f"pullback_toward_{primary}_range_mid")
+            return "avoid", confidence - 0.10, f"macro_position_high_{primary}_percentile_no_chase", "veto_long_high_percentile", evidence
+        if position >= warn_pct:
+            return trade_readiness, confidence - 0.04, no_trade_reason, "warn_long_upper_band", evidence
+        return trade_readiness, confidence, no_trade_reason, "ok", evidence
+
+    # bearish
+    if position <= (1.0 - veto_pct) or (max_distance_pct > 0 and to_low <= max_distance_pct):
+        confirmation_needed.append(f"bounce_toward_{primary}_range_mid")
+        return "avoid", confidence - 0.10, f"macro_position_low_{primary}_percentile_no_chase", "veto_short_low_percentile", evidence
+    if position <= (1.0 - warn_pct):
+        return trade_readiness, confidence - 0.04, no_trade_reason, "warn_short_lower_band", evidence
+    return trade_readiness, confidence, no_trade_reason, "ok", evidence
+
+
 def _window_price_change_pct(candles: list[dict[str, Any]], *, bars: int) -> float:
     ordered = _sort_candles(candles)
     if len(ordered) < bars or bars <= 0:
@@ -363,6 +508,9 @@ def analyze_wyckoff_shortterm(
     mark_deviation_pct = 0.0
     if effective_price > 0 and mark_price > 0:
         mark_deviation_pct = ((mark_price - effective_price) / effective_price) * 100.0
+    # Macro range position is computed once, up front, from the same candle
+    # dict the 1h logic uses, so replay/sweep see exactly what production sees.
+    macro_position = _macro_position_snapshot(candles_by_interval, price=effective_price, config=resolved_config)
 
     breakout_change_pct = _config_float(resolved_config, "breakoutChangePct", "breakout_change_pct")
     breakout_volume_ratio = _config_float(resolved_config, "breakoutVolumeRatio", "breakout_volume_ratio")
@@ -545,6 +693,25 @@ def analyze_wyckoff_shortterm(
         confidence = 0.48
         no_trade_reason = "range_balance_no_edge"
 
+    # Macro position filter runs AFTER the 1h structure has been classified and
+    # BEFORE the funding/OI/mark-price adjustments, so a veto is never undone
+    # by a +0.03 OI bonus. It only tightens readiness.
+    (
+        trade_readiness,
+        confidence,
+        no_trade_reason,
+        macro_position_verdict,
+        macro_position_evidence,
+    ) = _apply_macro_position_filter(
+        entry_bias=entry_bias,
+        trade_readiness=trade_readiness,
+        confidence=confidence,
+        no_trade_reason=no_trade_reason,
+        confirmation_needed=confirmation_needed,
+        macro=macro_position,
+        config=resolved_config,
+    )
+
     if entry_bias == "bullish":
         if funding_rate < 0:
             confidence += 0.02
@@ -589,6 +756,19 @@ def analyze_wyckoff_shortterm(
         "oi_change_pct": round(_safe_float(oi_change_pct), 4),
         "price_source": str(price_source or "").strip(),
         "mark_price_deviation_pct": round(mark_deviation_pct, 6),
+        # ---- new macro-position fields (additive; nothing above was renamed) ----
+        "macro_position_status": macro_position.get("status"),
+        "macro_position_verdict": macro_position_verdict,
+        "macro_position_evidence": macro_position_evidence,
+        "range_position_pct_24h": (macro_position.get("window_24h") or {}).get("position_pct"),
+        "range_position_pct_4h": (macro_position.get("window_4h") or {}).get("position_pct"),
+        "range_high_24h": (macro_position.get("window_24h") or {}).get("high"),
+        "range_low_24h": (macro_position.get("window_24h") or {}).get("low"),
+        "range_high_4h": (macro_position.get("window_4h") or {}).get("high"),
+        "range_low_4h": (macro_position.get("window_4h") or {}).get("low"),
+        "distance_to_24h_high_pct": (macro_position.get("window_24h") or {}).get("distance_to_high_pct"),
+        "distance_to_24h_low_pct": (macro_position.get("window_24h") or {}).get("distance_to_low_pct"),
+        "macro_position": macro_position,
         "invalidation": (
             f"loss_of_{round(range_low, 4)}"
             if entry_bias == "bullish"
