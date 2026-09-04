@@ -15,6 +15,7 @@ import org.springframework.test.context.jdbc.Sql;
 
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -125,9 +126,18 @@ import static org.assertj.core.api.Assertions.assertThat;
         "limit_price decimal(20,8)," +
         "quantity_base decimal(20,8)," +
         "okx_enhanced_execution boolean," +
+        "client_order_id varchar(64)," +
+        "filled_quantity decimal(20,8)," +
+        "avg_fill_price decimal(20,8)," +
+        "fee decimal(20,8)," +
+        "fee_ccy varchar(16)," +
+        "post_only boolean," +
         "status varchar(32)," +
         "order_status varchar(32)," +
-        "created_at timestamp default current_timestamp" +
+        "filled_at timestamp," +
+        "raw_payload clob," +
+        "created_at timestamp default current_timestamp," +
+        "updated_at timestamp" +
     ")",
     "insert into exchange_order (trace_id, exchange_code, symbol, side, mode, order_ref, status, order_status) values " +
         "('t-1', 'binance', 'BTCUSDT', 'BUY', 'paper', 'ord-1', 'filled', 'FILLED')," +
@@ -140,12 +150,28 @@ import static org.assertj.core.api.Assertions.assertThat;
         "('trace-short-open-1', 'binance', 'XAUUSDT', 'SELL', 'paper', 'ord-short-open-1', 'OPEN_SHORT', 'short', false, 'filled', 'FILLED')," +
         "('trace-short-close-1', 'binance', 'XAUUSDT', 'BUY', 'paper', 'ord-short-close-1', 'CLOSE', 'short', true, 'filled', 'FILLED')," +
         "('trace-guard-close-1', 'okx', 'ETHUSDT', 'BUY', 'paper', 'ord-guard-close-1', null, 'short', true, 'filled', 'FILLED')",
+    // 列必须覆盖 selectRecentExchangeFills 查询的全部字段。这份内联 DDL 和
+    // mapper 漂移过一次：缺 exchange_code 等列，H2 直接抛
+    // "Column EXCHANGE_CODE not found"，用例长期红着被当成已知失败。
+    // 生产 MySQL 上这些列都在，所以只是测试陈旧，不是 mapper 有问题。
     "create table exchange_fill (" +
         "id bigint auto_increment primary key," +
         "trace_id varchar(64)," +
+        "exchange_code varchar(32)," +
+        "symbol varchar(32)," +
+        "side varchar(16)," +
+        "position_side varchar(16)," +
         "order_ref varchar(64)," +
+        "trade_id varchar(64)," +
         "fill_price decimal(20,8)," +
         "fill_quantity decimal(20,8)," +
+        "fee decimal(20,8)," +
+        "fee_ccy varchar(16)," +
+        "is_maker boolean," +
+        "exec_type varchar(16)," +
+        "realized_pnl decimal(20,8)," +
+        "filled_at timestamp," +
+        "raw_payload clob," +
         "created_at timestamp default current_timestamp" +
     ")",
     "insert into exchange_fill (trace_id, order_ref, fill_price, fill_quantity) values " +
@@ -157,6 +183,21 @@ import static org.assertj.core.api.Assertions.assertThat;
         "('trace-unrelated-same-ref', 'ord-guard-close-1', 120.00000000, 9.00000000)"
 })
 class TradeRuntimeOverviewMapperTest {
+
+    static {
+        // 测试数据用 H2 的 CURRENT_TIMESTAMP 生成（JVM 默认时区），而查询参数用
+        // TradeRuntimeTimeUtils.nowSqlDateTime()（固定 Asia/Shanghai，见
+        // TradeRuntimeTimeUtils.DATABASE_ZONE）。JVM 时区不是 Asia/Shanghai 时
+        // 两者相差整整 8 小时，"10 分钟后过期"的窗口会被判成已过期，
+        // selectActiveSignalWindowsExcludesExpiredRows 恒返回空。
+        //
+        // 生产上不会有这个问题：MySQL 实例已设 default-time-zone='+08:00'，
+        // 与 DATABASE_ZONE 一致（实测 NOW() 比系统 UTC 正好快 8 小时）。所以这里
+        // 把测试 JVM 钉到同一时区，让 H2 复现生产的那对配对，而不是去改判定。
+        //
+        // static 块在 Spring 上下文构建（以及 @Sql 插入数据）之前执行。
+        TimeZone.setDefault(TimeZone.getTimeZone(TradeRuntimeTimeUtils.DATABASE_ZONE));
+    }
 
     @SpringBootApplication
     @MapperScan("com.ruoyi.dca.mapper.trade")
