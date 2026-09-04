@@ -602,7 +602,9 @@ CREATE TABLE `market_event` (
   `symbol` varchar(255) NULL DEFAULT NULL,
   `trace_id` varchar(64) NULL DEFAULT NULL,
   `volume` decimal(36,18) NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'row create time',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX idx_market_event_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TABLE IF EXISTS `market_kline_snapshot`;
@@ -623,7 +625,9 @@ CREATE TABLE `market_kline_snapshot` (
   `trace_id` varchar(64) NULL DEFAULT NULL,
   `trade_count` bigint NULL DEFAULT NULL,
   `volume` decimal(36,18) NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'row create time',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX idx_market_kline_snapshot_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TABLE IF EXISTS `market_metric_snapshot`;
@@ -647,7 +651,9 @@ CREATE TABLE `market_metric_snapshot` (
   `symbol` varchar(255) NULL DEFAULT NULL,
   `trace_id` varchar(64) NULL DEFAULT NULL,
   `volume_24h` decimal(36,18) NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'row create time',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX idx_market_metric_snapshot_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TABLE IF EXISTS `news_event`;
@@ -657,7 +663,9 @@ CREATE TABLE `news_event` (
   `source` varchar(255) NULL DEFAULT NULL,
   `symbol` varchar(255) NULL DEFAULT NULL,
   `trace_id` varchar(64) NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'row create time',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX idx_news_event_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TABLE IF EXISTS `notify_channel`;
@@ -743,7 +751,9 @@ CREATE TABLE `onchain_event` (
   `symbol` varchar(255) NULL DEFAULT NULL,
   `trace_id` varchar(64) NULL DEFAULT NULL,
   `wallet` varchar(255) NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'row create time',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX idx_onchain_event_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TABLE IF EXISTS `order_request`;
@@ -934,7 +944,8 @@ CREATE TABLE `signal_event` (
   `symbol` varchar(255) NULL DEFAULT NULL,
   `trace_id` varchar(64) NULL DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
-  INDEX `idx_signal_event_trace_id`(`trace_id`) USING BTREE
+  INDEX `idx_signal_event_trace_id`(`trace_id`) USING BTREE,
+  INDEX `idx_signal_event_created_at`(`created_at`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TABLE IF EXISTS `signal_score`;
@@ -945,7 +956,8 @@ CREATE TABLE `signal_score` (
   `signal_event_id` bigint NULL DEFAULT NULL,
   `signal_type` varchar(255) NULL DEFAULT NULL,
   `trace_id` varchar(64) NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_signal_score_created_at`(`created_at`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TABLE IF EXISTS `signal_window_state`;
@@ -983,7 +995,9 @@ CREATE TABLE `social_event` (
   `score` double NULL DEFAULT NULL,
   `symbol` varchar(255) NULL DEFAULT NULL,
   `trace_id` varchar(64) NULL DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'row create time',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX idx_social_event_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TABLE IF EXISTS `trade_agent_profile`;

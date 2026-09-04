@@ -54,4 +54,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         delete from event_raw
         where created_at &lt; #{cutoffTime}
     </delete>
+    <delete id="deleteFeatureSnapshotsBefore">
+        delete from feature_snapshot
+        where created_at &lt; #{cutoffTime}
+    </delete>
+
+    <delete id="deleteAgentObservationsBefore">
+        delete from agent_observation
+        where created_at &lt; #{cutoffTime}
+    </delete>
 </mapper>

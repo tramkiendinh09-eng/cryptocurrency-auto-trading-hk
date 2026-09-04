@@ -23,4 +23,8 @@ public interface TradeDataCleanupMapper {
     int deleteSocialEventsBefore(@Param("cutoffTime") String cutoffTime);
 
     int deleteEventRawsBefore(@Param("cutoffTime") String cutoffTime);
+
+    int deleteFeatureSnapshotsBefore(@Param("cutoffTime") String cutoffTime);
+
+    int deleteAgentObservationsBefore(@Param("cutoffTime") String cutoffTime);
 }
